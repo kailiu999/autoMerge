@@ -8,8 +8,9 @@ class GitMergeGUI:
     def __init__(self, master):
         self.master = master
         master.title("Git Merge Tool")
-        master.geometry("600x500")
-        master.configure(bg="#f5f5f7")
+        master.geometry("800x600")
+        master.configure(bg="#f0f2f5")
+        master.iconbitmap("git_macos_bigsur_icon_190141.ico")
         
         # 上部面板
         self.top_frame = tk.Frame(master, height=100, bg="#ffffff", bd=0, highlightthickness=0)
@@ -27,12 +28,12 @@ class GitMergeGUI:
         self.add_quick_tag("baotou-lifeline-web", "D:\\project\\baotou-lifeline-web")
         
         # 输入框
-        self.path_label = tk.Label(self.top_frame, text="项目路径:", font=("Helvetica", 12), fg="#8e8e93")
+        self.path_label = tk.Label(self.top_frame, text="项目路径:", font=("Helvetica", 14), fg="#606266", cursor="hand2")
         self.path_label.pack(anchor=tk.W, pady=(0, 5))
         
-        self.path_entry = tk.Entry(self.top_frame, width=50, font=("Helvetica", 12), 
-                                 bd=0, highlightthickness=1, highlightcolor="#007aff", 
-                                 highlightbackground="#c7c7cc", relief=tk.FLAT)
+        self.path_entry = tk.Entry(self.top_frame, width=50, font=("Helvetica", 14), 
+                                 bd=0, highlightthickness=1, highlightcolor="#409eff", 
+                                 highlightbackground="#dcdfe6", relief=tk.FLAT)
         self.path_entry.pack(fill=tk.X, pady=(0, 10))
         # 移除回车事件绑定
         
@@ -41,15 +42,16 @@ class GitMergeGUI:
             self.top_frame, 
             text="运行", 
             command=self.run_merge,
-            bg="#007aff",
+            bg="#409eff",
             fg="white",
-            activebackground="#0062cc",
+            activebackground="#66b1ff",
             activeforeground="white",
             relief=tk.FLAT,
             bd=0,
             padx=20,
-            pady=8,
-            font=("Helvetica", 12, "bold")
+            pady=10,
+            font=("Helvetica", 14, "bold"),
+            cursor="hand2"
         )
         self.run_button.pack(fill=tk.X, pady=(10, 0))
         
@@ -60,9 +62,10 @@ class GitMergeGUI:
         self.terminal = scrolledtext.ScrolledText(
             self.bottom_frame,
             wrap=tk.WORD,
-            bg="black",
-            fg="white",
-            insertbackground="white"
+            bg="#1e1e1e",
+            fg="#ffffff",
+            insertbackground="#ffffff",
+            font=("Consolas", 14)
         )
         self.terminal.pack(fill=tk.BOTH, expand=True)
         
@@ -136,10 +139,13 @@ class GitMergeGUI:
             self.tag_frame,
             text=tag_name,
             command=lambda: [self.path_entry.delete(0, tk.END), self.path_entry.insert(0, path)],
-            bg="#e0e0e0",
+            bg="#ecf5ff",
+            fg="#409eff",
             relief=tk.FLAT,
-            padx=5,
-            pady=2
+            padx=8,
+            pady=4,
+            font=("Helvetica", 14),
+            cursor="hand2"
         )
         # 使用pack布局放置标签
         tag.pack(side=tk.LEFT, padx=2, pady=2)
