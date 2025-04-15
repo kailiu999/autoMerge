@@ -1,4 +1,4 @@
 @echo off
 cd /d "%~dp0"
-python baotou_gui.py
+python git_merge_gui.py
 pause
