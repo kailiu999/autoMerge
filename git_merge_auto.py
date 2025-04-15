@@ -88,7 +88,7 @@ def main():
     ]
     
     for cmd, error_msg in commands:
-        print(f"➤ 正在执行: {cmd}")
+        print(f">>> 正在执行: {cmd}")
         result = run_git_command(cmd, error_msg)
         if result and result.stdout:
             print(result.stdout)
