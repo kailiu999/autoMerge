@@ -1,0 +1,20 @@
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+dist/
+build/
+*.spec
+
+# IDE settings
+.idea/
+.vscode/
+
+# Environment
+.env
+venv/
+env/
+
+# Logs
+*.log
