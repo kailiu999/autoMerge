@@ -26,6 +26,8 @@ class GitMergeGUI:
         self.existing_paths = []
         self.add_quick_tag("baotou-management-web", "D:\\project\\baotou-management-web")
         self.add_quick_tag("baotou-lifeline-web", "D:\\project\\baotou-lifeline-web")
+        self.add_quick_tag("neimeng-lifeline-web", "D:\\project\\neimeng-lifeline-web")
+        self.add_quick_tag("neimeng-management-web", "D:\\project\\neimeng-management-web")
         
         # 输入框
         self.path_label = tk.Label(self.top_frame, text="项目路径:", font=("Helvetica", 14), fg="#606266", cursor="hand2")
@@ -133,10 +135,17 @@ class GitMergeGUI:
         if len(self.tag_frame.winfo_children()) >= 10:
             self.tag_frame.winfo_children()[0].destroy()
             
+        # 计算当前行的标签数量
+        current_row_tags = len(self.tag_container.winfo_children())
+        if current_row_tags >= 3:
+            # 创建新的一行容器
+            self.tag_container = tk.Frame(self.tag_frame, bg="#ffffff")
+            self.tag_container.pack(fill=tk.X, expand=True)
+            
         # 从路径中提取最后一个文件夹名称作为标签文本
         tag_name = os.path.basename(path)
         tag = tk.Button(
-            self.tag_frame,
+            self.tag_container,
             text=tag_name,
             command=lambda: [self.path_entry.delete(0, tk.END), self.path_entry.insert(0, path)],
             bg="#ecf5ff",
@@ -149,16 +158,6 @@ class GitMergeGUI:
         )
         # 使用pack布局放置标签
         tag.pack(side=tk.LEFT, padx=2, pady=2)
-        
-        # 检查是否需要换行
-        self.tag_container.update()
-        if self.tag_container.winfo_reqwidth() > self.top_frame.winfo_width() - 30:
-            # 创建新的一行容器
-            self.tag_container = tk.Frame(self.tag_frame, bg="#ffffff")
-            self.tag_container.pack(fill=tk.X, expand=True)
-            # 将标签移动到新行
-            tag.pack_forget()
-            tag.pack(side=tk.LEFT, padx=2, pady=2)
         
         # 记录路径
         if path not in self.existing_paths:
