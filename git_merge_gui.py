@@ -78,7 +78,7 @@ class GitMergeGUI:
             padx=20,
             pady=10,
             font=("Helvetica", 14, "bold"),
-            cursor="hand2",
+            cursor="no",  # 初始为禁用鼠标样式
             state=tk.DISABLED
         )
         self.continue_button.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
@@ -179,7 +179,7 @@ class GitMergeGUI:
                                 conflict_info = json.loads(match.group(1))
                                 self.conflict_state = conflict_info
                                 self.append_output("检测到冲突，请手动解决后点击'继续'按钮...\n", "warning")
-                                self.continue_button.config(state=tk.NORMAL)
+                                self.continue_button.config(state=tk.NORMAL, cursor="hand2")
                                 break
                             except:
                                 pass
@@ -196,6 +196,10 @@ class GitMergeGUI:
             self.append_output("没有冲突状态需要继续处理！\n", "error")
             return
             
+        # 切换按钮光标为等待状态
+        self.continue_button.config(cursor="watch")
+        self.master.update()
+        
         project_path = self.current_project_path
         step_index = self.conflict_state.get("step", 0)
         branch = self.conflict_state.get("branch", "")
@@ -240,6 +244,8 @@ class GitMergeGUI:
                             conflict_info = json.loads(match.group(1))
                             self.conflict_state = conflict_info
                             self.append_output("仍然存在冲突，请手动解决后再次点击'继续'按钮...\n", "warning")
+                            # 恢复继续按钮光标
+                            self.continue_button.config(cursor="hand2")
                             return
                         except:
                             pass
@@ -259,7 +265,7 @@ class GitMergeGUI:
     def reset_state(self):
         """重置程序状态"""
         self.conflict_state = None
-        self.continue_button.config(state=tk.DISABLED)
+        self.continue_button.config(state=tk.DISABLED, cursor="no")
     
     def reset_merge(self):
         """重置当前操作，清空终端，准备重新开始"""
