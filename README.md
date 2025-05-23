@@ -51,8 +51,8 @@
    ```
 3. 将这些路径替换为你本地的实际项目路径，例如：
    ```python
-   self.add_quick_tag("我的项目1", "C:\\Users\\你的用户名\\项目\\项目1")
-   self.add_quick_tag("我的项目2", "C:\\Users\\你的用户名\\项目\\项目2")
+   self.add_quick_tag("我的项目1", "C:\\Users\\项目1")
+   self.add_quick_tag("我的项目2", "C:\\Users\\项目2")
    ```
 4. 如果你不需要这些快捷标签，可以删除这些行或注释掉
 
