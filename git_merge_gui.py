@@ -3,6 +3,9 @@ from tkinter import scrolledtext
 import subprocess
 import sys
 import os
+import threading
+import queue
+import json
 
 class GitMergeGUI:
     def __init__(self, master):
@@ -15,6 +18,13 @@ class GitMergeGUI:
         # 当前项目状态
         self.current_project_path = ""
         self.conflict_state = None  # 存储冲突状态信息
+        self.current_process = None  # 当前运行的进程
+        self.worker_thread = None  # 工作线程
+        self.message_queue = queue.Queue()  # 消息队列
+        self.is_running = False  # 标记是否正在执行任务
+        
+        # 启动消息处理
+        self.process_queue()
         
         # 上部面板
         self.top_frame = tk.Frame(master, height=100, bg="#ffffff", bd=0, highlightthickness=0)
@@ -83,11 +93,11 @@ class GitMergeGUI:
         )
         self.continue_button.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
         
-        # 重置按钮
-        self.reset_button = tk.Button(
+        # 取消按钮
+        self.cancel_button = tk.Button(
             self.button_frame, 
-            text="重置", 
-            command=self.reset_merge,
+            text="取消", 
+            command=self.cancel_operation,
             bg="#f56c6c",
             fg="white",
             activebackground="#f78989",
@@ -97,13 +107,47 @@ class GitMergeGUI:
             padx=20,
             pady=10,
             font=("Helvetica", 14, "bold"),
-            cursor="hand2"
+            cursor="no",  # 初始为禁用状态
+            state=tk.DISABLED
         )
-        self.reset_button.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(5, 0))
+        self.cancel_button.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(5, 0))
         
         # 下部终端显示区
         self.bottom_frame = tk.Frame(master, bg="#ffffff", bd=0, highlightthickness=0)
         self.bottom_frame.pack(fill=tk.BOTH, expand=True, padx=15, pady=(0, 15))
+        
+        # 终端标题栏
+        self.terminal_header = tk.Frame(self.bottom_frame, bg="#2d3748", height=30)
+        self.terminal_header.pack(fill=tk.X)
+        self.terminal_header.pack_propagate(False)
+        
+        self.terminal_title = tk.Label(
+            self.terminal_header, 
+            text="输出终端", 
+            bg="#2d3748", 
+            fg="#ffffff", 
+            font=("Helvetica", 12),
+            anchor=tk.W
+        )
+        self.terminal_title.pack(side=tk.LEFT, padx=10, pady=5)
+        
+        # 重置按钮在终端标题栏
+        self.reset_terminal_button = tk.Button(
+            self.terminal_header,
+            text="清空",
+            command=self.reset_merge,
+            bg="#4a5568",
+            fg="white",
+            activebackground="#718096",
+            activeforeground="white",
+            relief=tk.FLAT,
+            bd=0,
+            padx=10,
+            pady=2,
+            font=("Helvetica", 10),
+            cursor="hand2"
+        )
+        self.reset_terminal_button.pack(side=tk.RIGHT, padx=10, pady=5)
         
         self.terminal = scrolledtext.ScrolledText(
             self.bottom_frame,
@@ -119,17 +163,45 @@ class GitMergeGUI:
         self.terminal.tag_config("error", foreground="red")
         self.terminal.tag_config("success", foreground="green")
         self.terminal.tag_config("warning", foreground="yellow")
+        self.terminal.tag_config("info", foreground="cyan")
+    
+    def process_queue(self):
+        """处理消息队列"""
+        try:
+            while True:
+                message = self.message_queue.get_nowait()
+                message_type = message.get("type")
+                
+                if message_type == "output":
+                    self.process_output(message.get("text", ""))
+                elif message_type == "status":
+                    self.handle_status_update(message.get("data"))
+                elif message_type == "finished":
+                    self.handle_task_finished(message.get("success", False))
+                elif message_type == "error":
+                    self.append_output(f"执行出错: {message.get('error', '')}\n", "error")
+                    self.handle_task_finished(False)
+                    
+        except queue.Empty:
+            pass
+        
+        # 定期检查队列
+        self.master.after(100, self.process_queue)
     
     def run_merge(self):
-        self.reset_state()
+        """运行合并操作"""
+        if self.is_running:
+            return
+            
         project_path = self.path_entry.get()
         if not project_path:
             self.append_output("请先输入项目路径！\n", "error")
             return
-            
-        # 记录当前项目路径
+        
+        self.reset_state()
         self.current_project_path = project_path
-            
+        self.set_running_state(True)
+        
         # 在执行合并前检查并添加标签
         path = project_path.strip()
         if path:
@@ -139,66 +211,24 @@ class GitMergeGUI:
             if not any(existing_path.lower() == path.lower().replace('/', '\\') for existing_path in self.existing_paths):
                 name = os.path.basename(path)
                 self.add_quick_tag(name, path)
-            
+        
         self.append_output(f"正在执行合并操作，项目路径: {project_path}\n")
         
-        try:
-            # 调用git_merge_auto.py脚本
-            cmd = [sys.executable, "git_merge_auto.py", project_path]
-            process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                universal_newlines=True
-            )
-            
-            # 实时读取输出
-            output_lines = []
-            while True:
-                output = process.stdout.readline()
-                if output == '' and process.poll() is not None:
-                    break
-                if output:
-                    output_lines.append(output)
-                    self.process_output(output)
-            
-            # 检查错误输出
-            return_code = process.poll()
-            
-            # 如果进程返回了数据结构而不是简单的退出码
-            if len(output_lines) > 0 and '"status": "conflict"' in ' '.join(output_lines):
-                # 解析冲突状态
-                for line in output_lines:
-                    if '"status": "conflict"' in line:
-                        # 尝试从输出中提取冲突信息
-                        import re
-                        import json
-                        match = re.search(r'({.*})', line)
-                        if match:
-                            try:
-                                conflict_info = json.loads(match.group(1))
-                                self.conflict_state = conflict_info
-                                self.append_output("检测到冲突，请手动解决后点击'继续'按钮...\n", "warning")
-                                self.continue_button.config(state=tk.NORMAL, cursor="hand2")
-                                break
-                            except:
-                                pass
-                
-            _, stderr = process.communicate()
-            if stderr:
-                self.append_output(stderr, "error")
-                
-        except Exception as e:
-            self.append_output(f"执行出错: {str(e)}\n", "error")
+        # 在新线程中执行任务
+        self.worker_thread = threading.Thread(
+            target=self.execute_git_task,
+            args=(project_path,),
+            daemon=True
+        )
+        self.worker_thread.start()
     
     def continue_merge(self):
-        if not self.conflict_state or not self.current_project_path:
+        """继续合并操作"""
+        if not self.conflict_state or not self.current_project_path or self.is_running:
             self.append_output("没有冲突状态需要继续处理！\n", "error")
             return
-            
-        # 切换按钮光标为等待状态
-        self.continue_button.config(cursor="watch")
-        self.master.update()
+        
+        self.set_running_state(True)
         
         project_path = self.current_project_path
         step_index = self.conflict_state.get("step", 0)
@@ -206,61 +236,140 @@ class GitMergeGUI:
         
         self.append_output(f"继续执行，当前步骤索引: {step_index}, 分支: {branch}\n")
         
+        # 在新线程中执行任务
+        self.worker_thread = threading.Thread(
+            target=self.execute_git_task,
+            args=(project_path, step_index, branch),
+            daemon=True
+        )
+        self.worker_thread.start()
+    
+    def cancel_operation(self):
+        """取消当前操作"""
+        if not self.is_running:
+            return
+            
+        self.append_output("正在取消操作...\n", "warning")
+        
+        # 终止进程
+        if self.current_process and self.current_process.poll() is None:
+            try:
+                self.current_process.terminate()
+                # 给进程一些时间优雅退出
+                try:
+                    self.current_process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    # 如果进程没有优雅退出，强制杀死
+                    self.current_process.kill()
+                    self.current_process.wait()
+            except Exception as e:
+                self.append_output(f"取消进程时出错: {str(e)}\n", "error")
+        
+        self.set_running_state(False)
+        self.append_output("操作已取消\n", "warning")
+    
+    def execute_git_task(self, project_path, step_index=None, branch=None):
+        """在后台线程中执行git任务"""
         try:
-            # 调用git_merge_auto.py脚本的继续模式
-            cmd = [
-                sys.executable, 
-                "git_merge_auto.py", 
-                project_path,
-                "--continue",
-                str(step_index),
-                branch
-            ]
-            process = subprocess.Popen(
+            # 构建命令
+            if step_index is not None and branch is not None:
+                # 继续模式
+                cmd = [
+                    sys.executable, 
+                    "git_merge_auto.py", 
+                    project_path,
+                    "--continue",
+                    str(step_index),
+                    branch
+                ]
+            else:
+                # 普通模式
+                cmd = [sys.executable, "git_merge_auto.py", project_path]
+            
+            # 启动进程
+            self.current_process = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                universal_newlines=True
+                universal_newlines=True,
+                bufsize=1  # 行缓冲
             )
             
             # 实时读取输出
-            output_lines = []
             while True:
-                output = process.stdout.readline()
-                if output == '' and process.poll() is not None:
+                if self.current_process.poll() is not None:
                     break
+                    
+                output = self.current_process.stdout.readline()
                 if output:
-                    output_lines.append(output)
-                    self.process_output(output)
-            
-            # 检查是否有新的冲突状态
-            for line in output_lines:
-                if '"status": "conflict"' in line:
-                    import re
-                    import json
-                    match = re.search(r'({.*})', line)
-                    if match:
+                    # 检查是否是状态信息
+                    if output.startswith("STATUS_JSON:"):
                         try:
-                            conflict_info = json.loads(match.group(1))
-                            self.conflict_state = conflict_info
-                            self.append_output("仍然存在冲突，请手动解决后再次点击'继续'按钮...\n", "warning")
-                            # 恢复继续按钮光标
-                            self.continue_button.config(cursor="hand2")
-                            return
-                        except:
-                            pass
+                            status_json = output.replace("STATUS_JSON:", "").strip()
+                            status_data = json.loads(status_json)
+                            self.message_queue.put({"type": "status", "data": status_data})
+                        except Exception as e:
+                            self.message_queue.put({"type": "output", "text": output})
+                    else:
+                        self.message_queue.put({"type": "output", "text": output})
             
-            # 如果没有新的冲突，重置冲突状态
-            self.reset_state()
-            self.append_output("操作完成！\n", "success")
-                
-            # 检查错误输出
-            _, stderr = process.communicate()
+            # 读取剩余输出
+            remaining_stdout, stderr = self.current_process.communicate()
+            if remaining_stdout:
+                for line in remaining_stdout.splitlines():
+                    if line.startswith("STATUS_JSON:"):
+                        try:
+                            status_json = line.replace("STATUS_JSON:", "").strip()
+                            status_data = json.loads(status_json)
+                            self.message_queue.put({"type": "status", "data": status_data})
+                        except Exception as e:
+                            self.message_queue.put({"type": "output", "text": line + "\n"})
+                    else:
+                        self.message_queue.put({"type": "output", "text": line + "\n"})
+            
             if stderr:
-                self.append_output(stderr, "error")
-                
+                self.message_queue.put({"type": "output", "text": stderr})
+            
+            # 检查退出码
+            return_code = self.current_process.returncode
+            success = return_code == 0
+            
+            self.message_queue.put({"type": "finished", "success": success})
+            
         except Exception as e:
-            self.append_output(f"执行出错: {str(e)}\n", "error")
+            self.message_queue.put({"type": "error", "error": str(e)})
+    
+    def handle_status_update(self, status_data):
+        """处理状态更新"""
+        if status_data and status_data.get("status") == "conflict":
+            self.conflict_state = status_data
+            self.append_output("检测到冲突，请手动解决后点击'继续'按钮...\n", "warning")
+            self.continue_button.config(state=tk.NORMAL, cursor="hand2")
+            self.set_running_state(False)
+    
+    def handle_task_finished(self, success):
+        """处理任务完成"""
+        if success:
+            self.append_output("操作完成！\n", "success")
+            self.reset_state()
+        
+        self.set_running_state(False)
+    
+    def set_running_state(self, running):
+        """设置运行状态"""
+        self.is_running = running
+        
+        if running:
+            # 禁用运行按钮，启用取消按钮
+            self.run_button.config(state=tk.DISABLED, cursor="no", text="运行中...")
+            self.cancel_button.config(state=tk.NORMAL, cursor="hand2")
+            # 如果不是冲突状态，禁用继续按钮
+            if not self.conflict_state:
+                self.continue_button.config(state=tk.DISABLED, cursor="no")
+        else:
+            # 启用运行按钮，禁用取消按钮
+            self.run_button.config(state=tk.NORMAL, cursor="hand2", text="运行")
+            self.cancel_button.config(state=tk.DISABLED, cursor="no")
     
     def reset_state(self):
         """重置程序状态"""
@@ -269,6 +378,10 @@ class GitMergeGUI:
     
     def reset_merge(self):
         """重置当前操作，清空终端，准备重新开始"""
+        # 如果正在运行，先取消
+        if self.is_running:
+            self.cancel_operation()
+        
         self.reset_state()
         self.terminal.config(state=tk.NORMAL)
         self.terminal.delete(1.0, tk.END)
@@ -276,6 +389,7 @@ class GitMergeGUI:
         self.append_output("程序已重置，可以开始新的操作。\n", "success")
     
     def append_output(self, text, tag=None):
+        """添加输出到终端"""
         self.terminal.config(state=tk.NORMAL)
         if tag:
             self.terminal.insert(tk.END, text, tag)
@@ -317,27 +431,9 @@ class GitMergeGUI:
         # 记录路径
         if path not in self.existing_paths:
             self.existing_paths.append(path)
-            
-    def check_and_add_tag(self, event):
-        """检查并添加新标签"""
-        path = self.path_entry.get().strip()
-        if path:
-            self.append_output(f"原始输入路径: {path}\n")
-            # 统一路径格式为反斜杠并标准化大小写
-            path = path.replace('/', '\\').lower()
-            self.append_output(f"处理后路径: {path}\n")
-            self.append_output(f"现有路径列表: {self.existing_paths}\n")
-            # 检查路径是否已存在（忽略大小写）
-            if not any(existing_path.lower() == path.lower().replace('/', '\\') for existing_path in self.existing_paths):
-                name = os.path.basename(path)
-                self.append_output(f"添加新标签: {name} - {path}\n")
-                self.add_quick_tag(name, path)
-                # 更新existing_paths列表
-                self.existing_paths.append(path)
-            else:
-                self.append_output("路径已存在，不添加新标签\n")
     
     def process_output(self, text):
+        """处理输出文本"""
         # 处理带颜色的输出
         if "[ERROR]" in text:
             self.append_output(text, "error")
@@ -345,6 +441,8 @@ class GitMergeGUI:
             self.append_output(text, "success")
         elif "[WARNING]" in text:
             self.append_output(text, "warning")
+        elif ">>> 正在执行:" in text:
+            self.append_output(text, "info")
         else:
             self.append_output(text)
 
