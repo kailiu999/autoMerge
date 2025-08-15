@@ -38,10 +38,11 @@ class GitMergeGUI:
         
         # 示例快捷标签
         self.existing_paths = []
-        self.add_quick_tag("baotou-management-web", "D:\\project\\baotou-management-web")
-        self.add_quick_tag("baotou-lifeline-web", "D:\\project\\baotou-lifeline-web")
-        self.add_quick_tag("neimeng-lifeline-web", "D:\\project\\neimeng-lifeline-web")
-        self.add_quick_tag("neimeng-management-web", "D:\\project\\neimeng-management-web")
+        self.add_quick_tag("baotou-management-web", "D:\\project\\neimeng-SMX\\baotou-management-web")
+        self.add_quick_tag("baotou-lifeline-web", "D:\\project\\neimeng-SMX\\baotou-lifeline-web")
+        self.add_quick_tag("neimeng-lifeline-web", "D:\\project\\neimeng-SMX\\neimeng-lifeline-web")
+        self.add_quick_tag("neimeng-management-web", "D:\\project\\neimeng-SMX\\neimeng-management-web")
+        self.add_quick_tag("urban-lifeline-web", "D:\\project\\tieta-projects\\Urban-lifeline")
         
         # 输入框
         self.path_label = tk.Label(self.top_frame, text="项目路径:", font=("Helvetica", 14), fg="#606266", cursor="hand2")
@@ -72,45 +73,7 @@ class GitMergeGUI:
             font=("Helvetica", 14, "bold"),
             cursor="hand2"
         )
-        self.run_button.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
-        
-        # 继续按钮（初始禁用）
-        self.continue_button = tk.Button(
-            self.button_frame, 
-            text="继续", 
-            command=self.continue_merge,
-            bg="#67c23a",
-            fg="white",
-            activebackground="#85ce61",
-            activeforeground="white",
-            relief=tk.FLAT,
-            bd=0,
-            padx=20,
-            pady=10,
-            font=("Helvetica", 14, "bold"),
-            cursor="no",  # 初始为禁用鼠标样式
-            state=tk.DISABLED
-        )
-        self.continue_button.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
-        
-        # 取消按钮
-        self.cancel_button = tk.Button(
-            self.button_frame, 
-            text="取消", 
-            command=self.cancel_operation,
-            bg="#f56c6c",
-            fg="white",
-            activebackground="#f78989",
-            activeforeground="white",
-            relief=tk.FLAT,
-            bd=0,
-            padx=20,
-            pady=10,
-            font=("Helvetica", 14, "bold"),
-            cursor="no",  # 初始为禁用状态
-            state=tk.DISABLED
-        )
-        self.cancel_button.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(5, 0))
+        self.run_button.pack(fill=tk.X, expand=True)
         
         # 下部终端显示区
         self.bottom_frame = tk.Frame(master, bg="#ffffff", bd=0, highlightthickness=0)
@@ -222,69 +185,13 @@ class GitMergeGUI:
         )
         self.worker_thread.start()
     
-    def continue_merge(self):
-        """继续合并操作"""
-        if not self.conflict_state or not self.current_project_path or self.is_running:
-            self.append_output("没有冲突状态需要继续处理！\n", "error")
-            return
-        
-        self.set_running_state(True)
-        
-        project_path = self.current_project_path
-        step_index = self.conflict_state.get("step", 0)
-        branch = self.conflict_state.get("branch", "")
-        
-        self.append_output(f"继续执行，当前步骤索引: {step_index}, 分支: {branch}\n")
-        
-        # 在新线程中执行任务
-        self.worker_thread = threading.Thread(
-            target=self.execute_git_task,
-            args=(project_path, step_index, branch),
-            daemon=True
-        )
-        self.worker_thread.start()
+
     
-    def cancel_operation(self):
-        """取消当前操作"""
-        if not self.is_running:
-            return
-            
-        self.append_output("正在取消操作...\n", "warning")
-        
-        # 终止进程
-        if self.current_process and self.current_process.poll() is None:
-            try:
-                self.current_process.terminate()
-                # 给进程一些时间优雅退出
-                try:
-                    self.current_process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    # 如果进程没有优雅退出，强制杀死
-                    self.current_process.kill()
-                    self.current_process.wait()
-            except Exception as e:
-                self.append_output(f"取消进程时出错: {str(e)}\n", "error")
-        
-        self.set_running_state(False)
-        self.append_output("操作已取消\n", "warning")
-    
-    def execute_git_task(self, project_path, step_index=None, branch=None):
+    def execute_git_task(self, project_path):
         """在后台线程中执行git任务"""
         try:
             # 构建命令
-            if step_index is not None and branch is not None:
-                # 继续模式
-                cmd = [
-                    sys.executable, 
-                    "git_merge_auto.py", 
-                    project_path,
-                    "--continue",
-                    str(step_index),
-                    branch
-                ]
-            else:
-                # 普通模式
-                cmd = [sys.executable, "git_merge_auto.py", project_path]
+            cmd = [sys.executable, "git_merge_auto.py", project_path]
             
             # 启动进程
             self.current_process = subprocess.Popen(
@@ -343,8 +250,7 @@ class GitMergeGUI:
         """处理状态更新"""
         if status_data and status_data.get("status") == "conflict":
             self.conflict_state = status_data
-            self.append_output("检测到冲突，请手动解决后点击'继续'按钮...\n", "warning")
-            self.continue_button.config(state=tk.NORMAL, cursor="hand2")
+            self.append_output("检测到冲突，请手动解决冲突后重新运行...\n", "warning")
             self.set_running_state(False)
     
     def handle_task_finished(self, success):
@@ -360,28 +266,31 @@ class GitMergeGUI:
         self.is_running = running
         
         if running:
-            # 禁用运行按钮，启用取消按钮
+            # 禁用运行按钮
             self.run_button.config(state=tk.DISABLED, cursor="no", text="运行中...")
-            self.cancel_button.config(state=tk.NORMAL, cursor="hand2")
-            # 如果不是冲突状态，禁用继续按钮
-            if not self.conflict_state:
-                self.continue_button.config(state=tk.DISABLED, cursor="no")
         else:
-            # 启用运行按钮，禁用取消按钮
+            # 启用运行按钮
             self.run_button.config(state=tk.NORMAL, cursor="hand2", text="运行")
-            self.cancel_button.config(state=tk.DISABLED, cursor="no")
     
     def reset_state(self):
         """重置程序状态"""
         self.conflict_state = None
-        self.continue_button.config(state=tk.DISABLED, cursor="no")
     
     def reset_merge(self):
         """重置当前操作，清空终端，准备重新开始"""
-        # 如果正在运行，先取消
-        if self.is_running:
-            self.cancel_operation()
+        # 如果正在运行，终止进程
+        if self.is_running and self.current_process and self.current_process.poll() is None:
+            try:
+                self.current_process.terminate()
+                try:
+                    self.current_process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    self.current_process.kill()
+                    self.current_process.wait()
+            except Exception as e:
+                self.append_output(f"终止进程时出错: {str(e)}\n", "error")
         
+        self.set_running_state(False)
         self.reset_state()
         self.terminal.config(state=tk.NORMAL)
         self.terminal.delete(1.0, tk.END)
