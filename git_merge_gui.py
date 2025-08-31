@@ -1,11 +1,14 @@
 import tkinter as tk
-from tkinter import scrolledtext
+from tkinter import scrolledtext, messagebox, simpledialog, ttk
 import subprocess
 import sys
 import os
 import threading
 import queue
 import json
+import importlib.util
+import io
+from contextlib import redirect_stdout, redirect_stderr
 
 class GitMergeGUI:
     def __init__(self, master):
@@ -13,7 +16,24 @@ class GitMergeGUI:
         master.title("Git Merge Tool")
         master.geometry("800x600")
         master.configure(bg="#f0f2f5")
-        master.iconbitmap("git_macos_bigsur_icon_190141.ico")
+        
+        # 创建自定义标题栏
+        self.create_custom_titlebar()
+        
+        # 设置图标 - 处理打包后的路径问题
+        try:
+            if hasattr(sys, '_MEIPASS'):
+                # PyInstaller打包后的临时目录
+                icon_path = os.path.join(sys._MEIPASS, "git_macos_bigsur_icon_190141.ico")
+            else:
+                # 开发环境
+                icon_path = "git_macos_bigsur_icon_190141.ico"
+            master.iconbitmap(icon_path)
+        except:
+            pass  # 如果图标加载失败，忽略错误
+        
+        # 配置文件路径
+        self.config_file = "quick_tags_config.json"
         
         # 当前项目状态
         self.current_project_path = ""
@@ -33,16 +53,13 @@ class GitMergeGUI:
         # 快捷标签容器
         self.tag_frame = tk.Frame(self.top_frame, bg="#ffffff")
         self.tag_frame.pack(fill=tk.X, pady=(0, 10))
+        
         self.tag_container = tk.Frame(self.tag_frame, bg="#ffffff")
         self.tag_container.pack(fill=tk.X, expand=True)
         
-        # 示例快捷标签
+        # 初始化快捷标签
         self.existing_paths = []
-        self.add_quick_tag("baotou-management-web", "D:\\project\\neimeng-SMX\\baotou-management-web")
-        self.add_quick_tag("baotou-lifeline-web", "D:\\project\\neimeng-SMX\\baotou-lifeline-web")
-        self.add_quick_tag("neimeng-lifeline-web", "D:\\project\\neimeng-SMX\\neimeng-lifeline-web")
-        self.add_quick_tag("neimeng-management-web", "D:\\project\\neimeng-SMX\\neimeng-management-web")
-        self.add_quick_tag("urban-lifeline-web", "D:\\project\\tieta-projects\\Urban-lifeline")
+        self.load_quick_tags()  # 加载保存的标签
         
         # 输入框
         self.path_label = tk.Label(self.top_frame, text="项目路径:", font=("Helvetica", 14), fg="#606266", cursor="hand2")
@@ -128,6 +145,157 @@ class GitMergeGUI:
         self.terminal.tag_config("warning", foreground="yellow")
         self.terminal.tag_config("info", foreground="cyan")
     
+    def create_custom_titlebar(self):
+        """创建自定义标题栏"""
+        # 隐藏默认标题栏
+        self.master.overrideredirect(True)
+        
+        # 创建自定义标题栏
+        self.titlebar = tk.Frame(self.master, bg="#2d3748", height=30)
+        self.titlebar.pack(fill=tk.X)
+        self.titlebar.pack_propagate(False)
+        
+        # 标题文本
+        self.title_label = tk.Label(
+            self.titlebar,
+            text="Git Merge Tool",
+            bg="#2d3748",
+            fg="white",
+            font=("Helvetica", 10, "bold")
+        )
+        self.title_label.pack(side=tk.LEFT, padx=10, pady=5)
+        
+        # 按钮容器
+        button_frame = tk.Frame(self.titlebar, bg="#2d3748")
+        button_frame.pack(side=tk.RIGHT, pady=2)
+        
+        # 设置按钮
+        self.settings_btn = tk.Button(
+            button_frame,
+            text="⚙",
+            command=self.open_settings,
+            bg="#4a5568",
+            fg="white",
+            activebackground="#718096",
+            activeforeground="white",
+            relief=tk.FLAT,
+            bd=0,
+            width=3,
+            height=1,
+            font=("Helvetica", 12),
+            cursor="hand2"
+        )
+        self.settings_btn.pack(side=tk.LEFT, padx=2)
+        
+        # 最小化按钮
+        self.minimize_btn = tk.Button(
+            button_frame,
+            text="─",
+            command=self.minimize_window,
+            bg="#4a5568",
+            fg="white",
+            activebackground="#718096",
+            activeforeground="white",
+            relief=tk.FLAT,
+            bd=0,
+            width=3,
+            height=1,
+            font=("Helvetica", 12, "bold"),
+            cursor="hand2"
+        )
+        self.minimize_btn.pack(side=tk.LEFT, padx=1)
+        
+        # 最大化/还原按钮
+        self.maximize_btn = tk.Button(
+            button_frame,
+            text="□",
+            command=self.toggle_maximize,
+            bg="#4a5568",
+            fg="white",
+            activebackground="#718096",
+            activeforeground="white",
+            relief=tk.FLAT,
+            bd=0,
+            width=3,
+            height=1,
+            font=("Helvetica", 12),
+            cursor="hand2"
+        )
+        self.maximize_btn.pack(side=tk.LEFT, padx=1)
+        
+        # 关闭按钮
+        self.close_btn = tk.Button(
+            button_frame,
+            text="×",
+            command=self.close_window,
+            bg="#e53e3e",
+            fg="white",
+            activebackground="#fc8181",
+            activeforeground="white",
+            relief=tk.FLAT,
+            bd=0,
+            width=3,
+            height=1,
+            font=("Helvetica", 12, "bold"),
+            cursor="hand2"
+        )
+        self.close_btn.pack(side=tk.LEFT, padx=1)
+        
+        # 用于窗口拖动的变量
+        self.start_x = 0
+        self.start_y = 0
+        self.is_maximized = False
+        self.normal_geometry = "800x600"
+        
+        # 绑定拖动事件
+        self.titlebar.bind("<Button-1>", self.start_move)
+        self.titlebar.bind("<B1-Motion>", self.do_move)
+        self.title_label.bind("<Button-1>", self.start_move)
+        self.title_label.bind("<B1-Motion>", self.do_move)
+        
+        # 双击最大化/还原
+        self.titlebar.bind("<Double-Button-1>", lambda e: self.toggle_maximize())
+        self.title_label.bind("<Double-Button-1>", lambda e: self.toggle_maximize())
+    
+    def minimize_window(self):
+        """最小化窗口"""
+        self.master.iconify()
+    
+    def toggle_maximize(self):
+        """切换最大化/还原窗口"""
+        if self.is_maximized:
+            # 还原窗口
+            self.master.geometry(self.normal_geometry)
+            self.maximize_btn.config(text="□")
+            self.is_maximized = False
+        else:
+            # 保存当前尺寸
+            self.normal_geometry = self.master.geometry()
+            # 最大化窗口
+            self.master.state('zoomed')
+            self.maximize_btn.config(text="▢")
+            self.is_maximized = True
+    
+    def close_window(self):
+        """关闭窗口"""
+        self.master.quit()
+        self.master.destroy()
+    
+    def start_move(self, event):
+        """开始拖动窗口"""
+        self.start_x = event.x_root
+        self.start_y = event.y_root
+    
+    def do_move(self, event):
+        """拖动窗口"""
+        if self.is_maximized:
+            return
+        x = self.master.winfo_x() + (event.x_root - self.start_x)
+        y = self.master.winfo_y() + (event.y_root - self.start_y)
+        self.master.geometry(f"+{x}+{y}")
+        self.start_x = event.x_root
+        self.start_y = event.y_root
+    
     def process_queue(self):
         """处理消息队列"""
         try:
@@ -167,13 +335,13 @@ class GitMergeGUI:
         
         # 在执行合并前检查并添加标签
         path = project_path.strip()
-        if path:
-            # 统一路径格式为反斜杠并标准化大小写
+        if path and path not in self.existing_paths:
+            # 标准化路径格式
             path = path.replace('/', '\\').lower()
             # 检查路径是否已存在（忽略大小写）
-            if not any(existing_path.lower() == path.lower().replace('/', '\\') for existing_path in self.existing_paths):
+            if not any(existing_path.lower() == path for existing_path in self.existing_paths):
                 name = os.path.basename(path)
-                self.add_quick_tag(name, path)
+                self.add_quick_tag(name, project_path)  # 使用原始路径
         
         self.append_output(f"正在执行合并操作，项目路径: {project_path}\n")
         
@@ -190,58 +358,111 @@ class GitMergeGUI:
     def execute_git_task(self, project_path):
         """在后台线程中执行git任务"""
         try:
-            # 构建命令
-            cmd = [sys.executable, "git_merge_auto.py", project_path]
-            
-            # 启动进程
-            self.current_process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                universal_newlines=True,
-                bufsize=1  # 行缓冲
-            )
-            
-            # 实时读取输出
-            while True:
-                if self.current_process.poll() is not None:
-                    break
+            # 在打包环境中直接导入并执行git_merge_auto模块，避免启动新进程
+            if hasattr(sys, '_MEIPASS'):
+                # PyInstaller打包后，直接导入模块
+                import importlib.util
+                script_path = os.path.join(sys._MEIPASS, "git_merge_auto.py")
+                spec = importlib.util.spec_from_file_location("git_merge_auto", script_path)
+                git_merge_auto = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(git_merge_auto)
+                
+                # 重定向输出到消息队列
+                import io
+                import contextlib
+                from contextlib import redirect_stdout, redirect_stderr
+                
+                stdout_capture = io.StringIO()
+                stderr_capture = io.StringIO()
+                
+                with redirect_stdout(stdout_capture), redirect_stderr(stderr_capture):
+                    # 模拟命令行参数
+                    original_argv = sys.argv.copy()
+                    sys.argv = ['git_merge_auto.py', project_path]
                     
-                output = self.current_process.stdout.readline()
-                if output:
-                    # 检查是否是状态信息
-                    if output.startswith("STATUS_JSON:"):
-                        try:
-                            status_json = output.replace("STATUS_JSON:", "").strip()
-                            status_data = json.loads(status_json)
-                            self.message_queue.put({"type": "status", "data": status_data})
-                        except Exception as e:
-                            self.message_queue.put({"type": "output", "text": output})
-                    else:
-                        self.message_queue.put({"type": "output", "text": output})
-            
-            # 读取剩余输出
-            remaining_stdout, stderr = self.current_process.communicate()
-            if remaining_stdout:
-                for line in remaining_stdout.splitlines():
-                    if line.startswith("STATUS_JSON:"):
-                        try:
-                            status_json = line.replace("STATUS_JSON:", "").strip()
-                            status_data = json.loads(status_json)
-                            self.message_queue.put({"type": "status", "data": status_data})
-                        except Exception as e:
+                    try:
+                        result = git_merge_auto.execute_git_workflow(project_path)
+                        success = bool(result) and result is not False
+                    except Exception as e:
+                        self.message_queue.put({"type": "error", "error": str(e)})
+                        return
+                    finally:
+                        sys.argv = original_argv
+                
+                # 发送捕获的输出
+                stdout_content = stdout_capture.getvalue()
+                stderr_content = stderr_capture.getvalue()
+                
+                if stdout_content:
+                    for line in stdout_content.splitlines():
+                        if line.startswith("STATUS_JSON:"):
+                            try:
+                                status_json = line.replace("STATUS_JSON:", "").strip()
+                                status_data = json.loads(status_json)
+                                self.message_queue.put({"type": "status", "data": status_data})
+                            except Exception as e:
+                                self.message_queue.put({"type": "output", "text": line + "\n"})
+                        else:
                             self.message_queue.put({"type": "output", "text": line + "\n"})
-                    else:
-                        self.message_queue.put({"type": "output", "text": line + "\n"})
-            
-            if stderr:
-                self.message_queue.put({"type": "output", "text": stderr})
-            
-            # 检查退出码
-            return_code = self.current_process.returncode
-            success = return_code == 0
-            
-            self.message_queue.put({"type": "finished", "success": success})
+                
+                if stderr_content:
+                    self.message_queue.put({"type": "output", "text": stderr_content})
+                
+                self.message_queue.put({"type": "finished", "success": success})
+                
+            else:
+                # 开发环境，使用子进程
+                cmd = [sys.executable, "git_merge_auto.py", project_path]
+                
+                # 启动进程
+                self.current_process = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    universal_newlines=True,
+                    bufsize=1  # 行缓冲
+                )
+                
+                # 实时读取输出
+                while True:
+                    if self.current_process.poll() is not None:
+                        break
+                        
+                    output = self.current_process.stdout.readline()
+                    if output:
+                        # 检查是否是状态信息
+                        if output.startswith("STATUS_JSON:"):
+                            try:
+                                status_json = output.replace("STATUS_JSON:", "").strip()
+                                status_data = json.loads(status_json)
+                                self.message_queue.put({"type": "status", "data": status_data})
+                            except Exception as e:
+                                self.message_queue.put({"type": "output", "text": output})
+                        else:
+                            self.message_queue.put({"type": "output", "text": output})
+                
+                # 读取剩余输出
+                remaining_stdout, stderr = self.current_process.communicate()
+                if remaining_stdout:
+                    for line in remaining_stdout.splitlines():
+                        if line.startswith("STATUS_JSON:"):
+                            try:
+                                status_json = line.replace("STATUS_JSON:", "").strip()
+                                status_data = json.loads(status_json)
+                                self.message_queue.put({"type": "status", "data": status_data})
+                            except Exception as e:
+                                self.message_queue.put({"type": "output", "text": line + "\n"})
+                        else:
+                            self.message_queue.put({"type": "output", "text": line + "\n"})
+                
+                if stderr:
+                    self.message_queue.put({"type": "output", "text": stderr})
+                
+                # 检查退出码
+                return_code = self.current_process.returncode
+                success = return_code == 0
+                
+                self.message_queue.put({"type": "finished", "success": success})
             
         except Exception as e:
             self.message_queue.put({"type": "error", "error": str(e)})
@@ -307,39 +528,87 @@ class GitMergeGUI:
         self.terminal.see(tk.END)
         self.terminal.config(state=tk.DISABLED)
     
-    def add_quick_tag(self, name, path):
+    def load_quick_tags(self):
+        """加载保存的快捷标签"""
+        try:
+            if os.path.exists(self.config_file):
+                with open(self.config_file, 'r', encoding='utf-8') as f:
+                    config = json.load(f)
+                    tags = config.get('quick_tags', [])
+                    for tag in tags:
+                        if 'name' in tag and 'path' in tag:
+                            self.add_quick_tag(tag['name'], tag['path'], save_config=False)
+        except Exception as e:
+            print(f"加载配置文件失败: {e}")
+            # 如果加载失败，添加一个默认标签
+            self.add_quick_tag("urban-lifeline-web", "C:\\Users\\Mrliu\\Desktop\\project\\Urban-lifeline")
+    
+    def save_quick_tags(self):
+        """保存快捷标签到配置文件"""
+        try:
+            tags = []
+            for path in self.existing_paths:
+                name = os.path.basename(path)
+                tags.append({'name': name, 'path': path})
+            
+            config = {'quick_tags': tags}
+            with open(self.config_file, 'w', encoding='utf-8') as f:
+                json.dump(config, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"保存配置文件失败: {e}")
+    
+    def add_quick_tag(self, name, path, save_config=True):
         """添加快捷标签"""
+        # 检查是否已经存在
+        if path in self.existing_paths:
+            return
+        
+        # 标准化路径格式
+        path = path.replace('/', '\\').strip()
+        
         # 限制最多10个标签
-        if len(self.tag_frame.winfo_children()) >= 10:
-            self.tag_frame.winfo_children()[0].destroy()
-            
-        # 计算当前行的标签数量
-        current_row_tags = len(self.tag_container.winfo_children())
-        if current_row_tags >= 3:
-            # 创建新的一行容器
-            self.tag_container = tk.Frame(self.tag_frame, bg="#ffffff")
-            self.tag_container.pack(fill=tk.X, expand=True)
-            
-        # 从路径中提取最后一个文件夹名称作为标签文本
-        tag_name = os.path.basename(path)
-        tag = tk.Button(
-            self.tag_container,
-            text=tag_name,
-            command=lambda: [self.path_entry.delete(0, tk.END), self.path_entry.insert(0, path)],
-            bg="#ecf5ff",
-            fg="#409eff",
-            relief=tk.FLAT,
-            padx=8,
-            pady=4,
-            font=("Helvetica", 14),
-            cursor="hand2"
-        )
-        # 使用pack布局放置标签
-        tag.pack(side=tk.LEFT, padx=2, pady=2)
+        if len(self.existing_paths) >= 10:
+            return
         
         # 记录路径
         if path not in self.existing_paths:
             self.existing_paths.append(path)
+        
+        # 创建标签组件
+        self.create_tag_widget(name, path)
+        
+        # 保存配置
+        if save_config:
+            self.save_quick_tags()
+    
+    def create_tag_widget(self, name, path):
+        """创建标签组件"""
+        # 计算当前行的标签数量
+        current_row_tags = len([w for w in self.tag_container.winfo_children() if isinstance(w, tk.Frame)])
+        if current_row_tags >= 3:
+            # 创建新的一行容器
+            self.tag_container = tk.Frame(self.tag_frame, bg="#ffffff")
+            self.tag_container.pack(fill=tk.X, expand=True)
+        
+        # 创建标签容器
+        tag_frame = tk.Frame(self.tag_container, bg="#ecf5ff", relief=tk.FLAT, bd=1)
+        tag_frame.pack(side=tk.LEFT, padx=2, pady=2)
+        
+        # 标签按钮
+        tag_button = tk.Button(
+            tag_frame,
+            text=name,
+            command=lambda: [self.path_entry.delete(0, tk.END), self.path_entry.insert(0, path)],
+            bg="#ecf5ff",
+            fg="#409eff",
+            relief=tk.FLAT,
+            bd=0,
+            padx=8,
+            pady=4,
+            font=("Helvetica", 10),
+            cursor="hand2"
+        )
+        tag_button.pack()
     
     def process_output(self, text):
         """处理输出文本"""
@@ -354,6 +623,326 @@ class GitMergeGUI:
             self.append_output(text, "info")
         else:
             self.append_output(text)
+    
+    def open_settings(self):
+        """打开设置对话框"""
+        settings_window = tk.Toplevel(self.master)
+        settings_window.title("设置")
+        settings_window.geometry("700x650")
+        settings_window.configure(bg="#ffffff")
+        settings_window.resizable(True, True)
+        settings_window.minsize(650, 600)
+        
+        # 设置窗口为模态
+        settings_window.transient(self.master)
+        settings_window.grab_set()
+        
+        # 居中显示
+        settings_window.update_idletasks()
+        x = (settings_window.winfo_screenwidth() // 2) - (700 // 2)
+        y = (settings_window.winfo_screenheight() // 2) - (650 // 2)
+        settings_window.geometry(f"700x650+{x}+{y}")
+        
+        # 创建选项卡
+        notebook = ttk.Notebook(settings_window)
+        notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # 快捷标签设置选项卡
+        tag_frame = ttk.Frame(notebook)
+        notebook.add(tag_frame, text="快捷标签设置")
+        
+        self.create_tag_settings_tab(tag_frame)
+    
+    def create_tag_settings_tab(self, parent):
+        """创建快捷标签设置选项卡内容"""
+        # 主容器
+        main_frame = tk.Frame(parent, bg="#ffffff")
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # 上半部分：已有标签列表
+        list_frame = tk.LabelFrame(main_frame, text="已有标签列表", bg="#ffffff", fg="#303133", font=("Helvetica", 12, "bold"))
+        list_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 15))
+        
+        # 表格头
+        header_frame = tk.Frame(list_frame, bg="#f5f7fa")
+        header_frame.pack(fill=tk.X, padx=5, pady=5)
+        
+        tk.Label(header_frame, text="名称", bg="#f5f7fa", fg="#606266", font=("Helvetica", 10, "bold"), width=15).pack(side=tk.LEFT)
+        tk.Label(header_frame, text="路径", bg="#f5f7fa", fg="#606266", font=("Helvetica", 10, "bold"), width=35).pack(side=tk.LEFT)
+        tk.Label(header_frame, text="操作", bg="#f5f7fa", fg="#606266", font=("Helvetica", 10, "bold"), width=10).pack(side=tk.LEFT)
+        
+        # 滚动列表容器
+        list_container = tk.Frame(list_frame, bg="#ffffff")
+        list_container.pack(fill=tk.BOTH, expand=True, padx=5, pady=(0, 5))
+        
+        # 创建滚动条和列表
+        canvas = tk.Canvas(list_container, bg="#ffffff", highlightthickness=0)
+        scrollbar = tk.Scrollbar(list_container, orient="vertical", command=canvas.yview)
+        scrollable_frame = tk.Frame(canvas, bg="#ffffff")
+        
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+        
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        
+        # 用于存储当前编辑的标签索引
+        self.editing_tag_index = None
+        
+        # 显示已有标签
+        self.refresh_tag_list(scrollable_frame)
+        
+        # 下半部分：新增/编辑标签表单
+        form_frame = tk.LabelFrame(main_frame, text="标签表单", bg="#ffffff", fg="#303133", font=("Helvetica", 12, "bold"))
+        form_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        # 表单内容
+        form_content = tk.Frame(form_frame, bg="#ffffff")
+        form_content.pack(fill=tk.X, padx=15, pady=15)
+        
+        # 名称输入
+        name_frame = tk.Frame(form_content, bg="#ffffff")
+        name_frame.pack(fill=tk.X, pady=(0, 15))
+        tk.Label(name_frame, text="名称:", bg="#ffffff", fg="#606266", width=8, anchor="w", font=("Helvetica", 10)).pack(side=tk.LEFT)
+        self.tag_name_entry = tk.Entry(name_frame, font=("Helvetica", 11), bd=1, relief=tk.SOLID)
+        self.tag_name_entry.pack(fill=tk.X, expand=True, padx=(10, 0))
+        
+        # 路径输入
+        path_frame = tk.Frame(form_content, bg="#ffffff")
+        path_frame.pack(fill=tk.X, pady=(0, 20))
+        tk.Label(path_frame, text="路径:", bg="#ffffff", fg="#606266", width=8, anchor="w", font=("Helvetica", 10)).pack(side=tk.LEFT)
+        self.tag_path_entry = tk.Entry(path_frame, font=("Helvetica", 11), bd=1, relief=tk.SOLID)
+        self.tag_path_entry.pack(fill=tk.X, expand=True, padx=(10, 0))
+        
+        # 按钮组
+        button_frame = tk.Frame(form_content, bg="#ffffff")
+        button_frame.pack(fill=tk.X)
+        
+        # 提交按钮
+        self.submit_button = tk.Button(
+            button_frame,
+            text="提交",
+            command=lambda: self.submit_tag_form(scrollable_frame),
+            bg="#409eff",
+            fg="white",
+            activebackground="#66b1ff",
+            relief=tk.FLAT,
+            bd=0,
+            padx=25,
+            pady=10,
+            font=("Helvetica", 11),
+            cursor="hand2"
+        )
+        self.submit_button.pack(side=tk.LEFT, padx=(0, 15))
+        
+        # 取消按钮
+        cancel_button = tk.Button(
+            button_frame,
+            text="取消",
+            command=self.clear_tag_form,
+            bg="#909399",
+            fg="white",
+            activebackground="#a6a9ad",
+            relief=tk.FLAT,
+            bd=0,
+            padx=25,
+            pady=10,
+            font=("Helvetica", 11),
+            cursor="hand2"
+        )
+        cancel_button.pack(side=tk.LEFT)
+        
+        # 存储引用以便在其他方法中使用
+        self.tag_list_frame = scrollable_frame
+    
+    def refresh_tag_list(self, list_frame):
+        """刷新标签列表显示"""
+        # 清空现有内容
+        for widget in list_frame.winfo_children():
+            widget.destroy()
+        
+        # 显示每个标签
+        for i, path in enumerate(self.existing_paths):
+            name = os.path.basename(path)
+            
+            # 创建行容器
+            row_frame = tk.Frame(list_frame, bg="#ffffff" if i % 2 == 0 else "#fafafa")
+            row_frame.pack(fill=tk.X, pady=1)
+            
+            # 名称
+            name_label = tk.Label(row_frame, text=name, bg=row_frame['bg'], fg="#303133", font=("Helvetica", 10), width=15, anchor="w")
+            name_label.pack(side=tk.LEFT, padx=5, pady=5)
+            
+            # 路径（截取显示）
+            display_path = path if len(path) <= 40 else "..." + path[-37:]
+            path_label = tk.Label(row_frame, text=display_path, bg=row_frame['bg'], fg="#606266", font=("Helvetica", 9), width=35, anchor="w")
+            path_label.pack(side=tk.LEFT, padx=5, pady=5)
+            
+            # 操作按钮
+            action_frame = tk.Frame(row_frame, bg=row_frame['bg'])
+            action_frame.pack(side=tk.LEFT, padx=5)
+            
+            # 编辑按钮
+            edit_button = tk.Button(
+                action_frame,
+                text="编辑",
+                command=lambda idx=i: self.edit_tag(idx),
+                bg="#67c23a",
+                fg="white",
+                activebackground="#85ce61",
+                relief=tk.FLAT,
+                bd=0,
+                padx=8,
+                pady=2,
+                font=("Helvetica", 8),
+                cursor="hand2"
+            )
+            edit_button.pack(side=tk.LEFT, padx=(0, 5))
+            
+            # 删除按钮
+            delete_button = tk.Button(
+                action_frame,
+                text="删除",
+                command=lambda idx=i: self.delete_tag_from_settings(idx),
+                bg="#f56c6c",
+                fg="white",
+                activebackground="#f78989",
+                relief=tk.FLAT,
+                bd=0,
+                padx=8,
+                pady=2,
+                font=("Helvetica", 8),
+                cursor="hand2"
+            )
+            delete_button.pack(side=tk.LEFT)
+    
+    def edit_tag(self, index):
+        """编辑指定索引的标签"""
+        if 0 <= index < len(self.existing_paths):
+            path = self.existing_paths[index]
+            name = os.path.basename(path)
+            
+            # 填充表单
+            self.tag_name_entry.delete(0, tk.END)
+            self.tag_name_entry.insert(0, name)
+            self.tag_path_entry.delete(0, tk.END)
+            self.tag_path_entry.insert(0, path)
+            
+            # 记录编辑的标签索引
+            self.editing_tag_index = index
+            
+            # 更改按钮文本
+            self.submit_button.config(text="更新")
+    
+    def delete_tag_from_settings(self, index):
+        """从设置中删除指定索引的标签"""
+        if 0 <= index < len(self.existing_paths):
+            path = self.existing_paths[index]
+            result = messagebox.askyesno("确认", f"确定要删除标签 '{os.path.basename(path)}' 吗？")
+            if result:
+                # 从列表中删除
+                self.existing_paths.pop(index)
+                
+                # 保存配置
+                self.save_quick_tags()
+                
+                # 刷新界面显示
+                self.refresh_tags_display()
+                
+                # 刷新设置中的列表
+                self.refresh_tag_list(self.tag_list_frame)
+                
+                # 清空表单
+                self.clear_tag_form()
+                
+                messagebox.showinfo("成功", "标签已删除！")
+    
+    def submit_tag_form(self, list_frame):
+        """提交标签表单"""
+        name = self.tag_name_entry.get().strip()
+        path = self.tag_path_entry.get().strip()
+        
+        if not name:
+            messagebox.showerror("错误", "请输入标签名称！")
+            return
+        
+        if not path:
+            messagebox.showerror("错误", "请输入项目路径！")
+            return
+        
+        # 验证路径是否存在
+        if not os.path.exists(path):
+            messagebox.showerror("错误", "路径不存在，请检查后重试！")
+            return
+        
+        # 标准化路径
+        path = path.replace('/', '\\').strip()
+        
+        if self.editing_tag_index is not None:
+            # 编辑模式
+            old_path = self.existing_paths[self.editing_tag_index]
+            
+            # 检查是否与其他标签重复
+            for i, existing_path in enumerate(self.existing_paths):
+                if i != self.editing_tag_index and existing_path.lower() == path.lower():
+                    messagebox.showerror("错误", "该路径的标签已存在！")
+                    return
+            
+            # 更新标签
+            self.existing_paths[self.editing_tag_index] = path
+            
+            # 保存配置
+            self.save_quick_tags()
+            
+            # 刷新界面显示
+            self.refresh_tags_display()
+            
+            messagebox.showinfo("成功", f"标签 '{name}' 更新成功！")
+        else:
+            # 新增模式
+            # 检查是否已存在
+            if any(existing_path.lower() == path.lower() for existing_path in self.existing_paths):
+                messagebox.showerror("错误", "该路径的标签已存在！")
+                return
+            
+            # 限制数量
+            if len(self.existing_paths) >= 10:
+                messagebox.showwarning("警告", "最多只能添加10个快捷标签，请先删除一些后再添加！")
+                return
+            
+            # 添加新标签
+            self.add_quick_tag(name, path)
+            
+            messagebox.showinfo("成功", f"快捷标签 '{name}' 添加成功！")
+        
+        # 刷新列表显示
+        self.refresh_tag_list(list_frame)
+        
+        # 清空表单
+        self.clear_tag_form()
+    
+    def clear_tag_form(self):
+        """清空标签表单"""
+        self.tag_name_entry.delete(0, tk.END)
+        self.tag_path_entry.delete(0, tk.END)
+        self.editing_tag_index = None
+        self.submit_button.config(text="提交")
+    
+    def refresh_tags_display(self):
+        """刷新主界面中的标签显示"""
+        # 清空现有标签
+        for widget in self.tag_container.winfo_children():
+            widget.destroy()
+        
+        # 重新添加所有标签
+        for path in self.existing_paths:
+            name = os.path.basename(path)
+            self.create_tag_widget(name, path)
 
 if __name__ == "__main__":
     root = tk.Tk()
