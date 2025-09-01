@@ -10,21 +10,6 @@ import importlib.util
 import io
 from contextlib import redirect_stdout, redirect_stderr
 
-# 系统托盘功能依赖
-try:
-    import pystray
-    from PIL import Image, ImageDraw
-    TRAY_AVAILABLE = True
-    print("系统托盘功能已加载")
-except ImportError as e:
-    # 创建占位符变量以避免IDE警告
-    pystray = None
-    Image = None
-    ImageDraw = None
-    TRAY_AVAILABLE = False
-    print(f"警告: 系统托盘功能不可用，原因: {e}")
-    print("请安装 pystray 和 Pillow: pip install pystray Pillow")
-
 class GitMergeGUI:
     def __init__(self, master):
         self.master = master
@@ -32,14 +17,8 @@ class GitMergeGUI:
         master.geometry("800x600")
         master.configure(bg="#f0f2f5")
         
-        print("=== Git Merge Tool 启动 ===")
-        print(f"Python版本: {sys.version}")
-        print(f"操作系统: {os.name}")
-        print(f"托盘功能可用: {TRAY_AVAILABLE}")
-        
         # 获取图标路径
         self.icon_path = self.get_icon_path()
-        print(f"图标路径: {self.icon_path}")
         
         # 初始设置窗口属性和图标
         master.resizable(True, True)  # 允许调整大小
@@ -51,12 +30,8 @@ class GitMergeGUI:
         if os.name == 'nt':
             try:
                 master.wm_attributes('-toolwindow', False)
-                print("窗口属性已设置，确保任务栏显示")
             except Exception as e:
                 print(f"设置窗口属性失败: {e}")
-        
-        # 创建自定义标题栏
-        self.create_custom_titlebar()
         
         # 配置文件路径
         self.config_file = "quick_tags_config.json"
@@ -69,19 +44,11 @@ class GitMergeGUI:
         self.message_queue = queue.Queue()  # 消息队列
         self.is_running = False  # 标记是否正在执行任务
         
-        # 系统托盘相关
-        self.tray_icon = None
-        self.is_minimized_to_tray = False
-        self.tray_running = False
-        
         # 启动消息处理
         self.process_queue()
         
-        # 绑定窗口关闭事件（点击X按钮时最小化到托盘）
+        # 绑定窗口关闭事件（点击X按钮时直接关闭程序）
         self.master.protocol("WM_DELETE_WINDOW", self.on_window_close)
-        
-        # 启动时就创建并运行系统托盘图标
-        self.initialize_tray_icon()
         
         # 上部面板
         self.top_frame = tk.Frame(master, height=100, bg="#ffffff", bd=0, highlightthickness=0)
@@ -111,6 +78,24 @@ class GitMergeGUI:
         self.button_frame = tk.Frame(self.top_frame, bg="#ffffff")
         self.button_frame.pack(fill=tk.X, pady=(5, 0))
         
+        # 设置按钮
+        self.settings_btn = tk.Button(
+            self.button_frame,
+            text="⚙ 设置",
+            command=self.open_settings,
+            bg="#67c23a",
+            fg="white",
+            activebackground="#85ce61",
+            activeforeground="white",
+            relief=tk.FLAT,
+            bd=0,
+            padx=20,
+            pady=10,
+            font=("Helvetica", 14, "bold"),
+            cursor="hand2"
+        )
+        self.settings_btn.pack(side=tk.RIGHT, padx=(10, 0))
+        
         # 运行按钮
         self.run_button = tk.Button(
             self.button_frame, 
@@ -127,7 +112,7 @@ class GitMergeGUI:
             font=("Helvetica", 14, "bold"),
             cursor="hand2"
         )
-        self.run_button.pack(fill=tk.X, expand=True)
+        self.run_button.pack(side=tk.LEFT, fill=tk.X, expand=True)
         
         # 下部终端显示区
         self.bottom_frame = tk.Frame(master, bg="#ffffff", bd=0, highlightthickness=0)
@@ -182,117 +167,7 @@ class GitMergeGUI:
         self.terminal.tag_config("warning", foreground="yellow")
         self.terminal.tag_config("info", foreground="cyan")
     
-    def create_custom_titlebar(self):
-        """创建自定义标题栏"""
-        # 隐藏默认标题栏
-        self.master.overrideredirect(True)
-        
-        # 创建自定义标题栏
-        self.titlebar = tk.Frame(self.master, bg="#2d3748", height=30)
-        self.titlebar.pack(fill=tk.X)
-        self.titlebar.pack_propagate(False)
-        
-        # 标题文本
-        self.title_label = tk.Label(
-            self.titlebar,
-            text="Git Merge Tool",
-            bg="#2d3748",
-            fg="white",
-            font=("Helvetica", 10, "bold")
-        )
-        self.title_label.pack(side=tk.LEFT, padx=10, pady=5)
-        
-        # 按钮容器
-        button_frame = tk.Frame(self.titlebar, bg="#2d3748")
-        button_frame.pack(side=tk.RIGHT, pady=2)
-        
-        # 设置按钮
-        self.settings_btn = tk.Button(
-            button_frame,
-            text="⚙",
-            command=self.open_settings,
-            bg="#4a5568",
-            fg="white",
-            activebackground="#718096",
-            activeforeground="white",
-            relief=tk.FLAT,
-            bd=0,
-            width=3,
-            height=1,
-            font=("Helvetica", 12),
-            cursor="hand2"
-        )
-        self.settings_btn.pack(side=tk.LEFT, padx=2)
-        
-        # 最小化按钮
-        self.minimize_btn = tk.Button(
-            button_frame,
-            text="─",
-            command=self.minimize_window,
-            bg="#4a5568",
-            fg="white",
-            activebackground="#718096",
-            activeforeground="white",
-            relief=tk.FLAT,
-            bd=0,
-            width=3,
-            height=1,
-            font=("Helvetica", 12, "bold"),
-            cursor="hand2"
-        )
-        self.minimize_btn.pack(side=tk.LEFT, padx=1)
-        
-        # 最大化/还原按钮
-        self.maximize_btn = tk.Button(
-            button_frame,
-            text="□",
-            command=self.toggle_maximize,
-            bg="#4a5568",
-            fg="white",
-            activebackground="#718096",
-            activeforeground="white",
-            relief=tk.FLAT,
-            bd=0,
-            width=3,
-            height=1,
-            font=("Helvetica", 12),
-            cursor="hand2"
-        )
-        self.maximize_btn.pack(side=tk.LEFT, padx=1)
-        
-        # 关闭按钮
-        self.close_btn = tk.Button(
-            button_frame,
-            text="×",
-            command=self.close_window,
-            bg="#e53e3e",
-            fg="white",
-            activebackground="#fc8181",
-            activeforeground="white",
-            relief=tk.FLAT,
-            bd=0,
-            width=3,
-            height=1,
-            font=("Helvetica", 12, "bold"),
-            cursor="hand2"
-        )
-        self.close_btn.pack(side=tk.LEFT, padx=1)
-        
-        # 用于窗口拖动的变量
-        self.start_x = 0
-        self.start_y = 0
-        self.is_maximized = False
-        self.normal_geometry = "800x600"
-        
-        # 绑定拖动事件
-        self.titlebar.bind("<Button-1>", self.start_move)
-        self.titlebar.bind("<B1-Motion>", self.do_move)
-        self.title_label.bind("<Button-1>", self.start_move)
-        self.title_label.bind("<B1-Motion>", self.do_move)
-        
-        # 双击最大化/还原
-        self.titlebar.bind("<Double-Button-1>", lambda e: self.toggle_maximize())
-        self.title_label.bind("<Double-Button-1>", lambda e: self.toggle_maximize())
+
     
     def get_icon_path(self):
         """获取图标文件路径"""
@@ -305,10 +180,8 @@ class GitMergeGUI:
                 icon_path = os.path.abspath("git_macos_bigsur_icon_190141.ico")
             
             if os.path.exists(icon_path):
-                print(f"图标文件找到: {icon_path}")
                 return icon_path
             else:
-                print(f"图标文件不存在: {icon_path}")
                 return None
         except Exception as e:
             print(f"获取图标路径失败: {e}")
@@ -323,7 +196,6 @@ class GitMergeGUI:
                 
                 # 设置窗口图标
                 self.master.iconbitmap(self.icon_path)
-                print(f"窗口图标设置成功: {self.icon_path}")
                 
                 # Windows 特殊处理：确保任务栏图标正确显示
                 if os.name == 'nt':
@@ -331,7 +203,6 @@ class GitMergeGUI:
                     try:
                         # 方法1: 使用wm_iconbitmap
                         self.master.wm_iconbitmap(self.icon_path)
-                        print("使用wm_iconbitmap设置图标")
                     except Exception:
                         pass
                     
@@ -341,7 +212,6 @@ class GitMergeGUI:
                     # 方法3: 设置窗口属性确保图标正确显示在任务栏
                     try:
                         self.master.wm_attributes('-toolwindow', False)
-                        print("确保窗口在任务栏显示")
                     except Exception:
                         pass
                     
@@ -351,361 +221,25 @@ class GitMergeGUI:
                 try:
                     # 尝试使用wm_iconbitmap
                     self.master.wm_iconbitmap(self.icon_path)
-                    print(f"使用wm_iconbitmap设置图标成功")
                 except Exception as e2:
                     print(f"wm_iconbitmap也失败: {e2}")
         else:
-            print("图标文件不存在，跳过图标设置")
-    
-    def create_tray_icon(self):
-        """创建系统托盘图标 - Windows 11优化版本"""
-        if not TRAY_AVAILABLE or pystray is None:
-            print("系统托盘功能不可用，跳过托盘图标创建")
-            return None
-            
-        try:
-            # 创建托盘图标图像
-            icon_image = self.create_tray_image()
-            if icon_image is None:
-                print("无法创建托盘图标图像")
-                return None
-            
-            # Windows 11特殊处理：确保图标符合系统要求
-            if os.name == 'nt' and Image is not None:
-                # 确保图标是32x32像素，Windows 11推荐尺寸
-                icon_image = icon_image.resize((32, 32), Image.Resampling.LANCZOS)
-                print("Windows 11: 调整图标尺寸为32x32")
-            
-            # 托盘菜单
-            menu = pystray.Menu(
-                pystray.MenuItem("显示窗口", self.show_window, default=True),
-                pystray.MenuItem("隐藏窗口", self.hide_window),
-                pystray.Menu.SEPARATOR,
-                pystray.MenuItem("关于", self.show_about),
-                pystray.MenuItem("退出", self.quit_application)
-            )
-            
-            # 创建托盘图标
-            icon = pystray.Icon(
-                "GitMergeTool",
-                icon_image,
-                "Git Merge Tool - 右键显示菜单",  # Windows 11下提供更清晰的提示
-                menu
-            )
-            
-            print("托盘图标创建成功")
-            return icon
-            
-        except Exception as e:
-            print(f"创建托盘图标失败: {e}")
-            import traceback
-            traceback.print_exc()
-            return None
-    
-    def create_tray_image(self):
-        """创建托盘图标图像"""
-        try:
-            # 首先尝试使用项目图标文件
-            if self.icon_path and os.path.exists(self.icon_path) and Image is not None:
-                try:
-                    image = Image.open(self.icon_path)
-                    # 转换为RGBA模式以支持透明度
-                    if image.mode != 'RGBA':
-                        image = image.convert('RGBA')
-                    print(f"成功加载托盘图标: {self.icon_path}")
-                    return image
-                except Exception as e:
-                    print(f"加载图标文件失败: {e}，使用默认图标")
-                    
-            # 创建默认图标
-            if Image is not None and ImageDraw is not None:
-                # Windows 11下创建更清晰的图标
-                width = 32
-                height = 32
-                image = Image.new('RGBA', (width, height), (0, 0, 0, 0))  # 透明背景
-                draw = ImageDraw.Draw(image)
-                
-                # 创建渐变效果的圆形图标
-                padding = 2
-                draw.ellipse(
-                    [padding, padding, width-padding, height-padding], 
-                    fill='#409eff', 
-                    outline='#2d3748', 
-                    width=2
-                )
-                
-                # 添加Git标识
-                try:
-                    # 尝试使用更好的字体
-                    from PIL import ImageFont
-                    try:
-                        font = ImageFont.truetype("arial.ttf", 14)
-                    except:
-                        font = ImageFont.load_default()
-                    draw.text((width//2-7, height//2-8), 'G', fill='white', font=font)
-                except ImportError:
-                    # 如果没有ImageFont，使用默认
-                    draw.text((width//2-6, height//2-6), 'G', fill='white')
-                    
-                print("成功创建默认托盘图标")
-                return image
-            else:
-                print("PIL不可用，无法创建托盘图标")
-                return None
-                
-        except Exception as e:
-            print(f"创建托盘图标图像失败: {e}")
-            return None
-    
-    def show_window(self, icon=None, item=None):
-        """显示窗口（恢复自定义标题栏）"""
-        try:
-            # 1. 从最小化状态恢复
-            self.master.deiconify()
-            self.master.lift()
-            self.master.focus_force()
-            self.is_minimized_to_tray = False
-            
-            # 2. 重新应用自定义标题栏（隐藏系统默认标题栏）
-            self.master.overrideredirect(True)
-            print("已恢复自定义标题栏")
-            
-            # 3. 重新绑定标题栏拖动事件（因为overrideredirect会重置绑定）
-            if hasattr(self, 'titlebar'):
-                self.titlebar.bind("<Button-1>", self.start_move)
-                self.titlebar.bind("<B1-Motion>", self.do_move)
-                # 双击最大化/还原
-                self.titlebar.bind("<Double-Button-1>", lambda e: self.toggle_maximize())
-                print("标题栏拖动事件已重新绑定")
-            
-            if hasattr(self, 'title_label'):
-                self.title_label.bind("<Button-1>", self.start_move)
-                self.title_label.bind("<B1-Motion>", self.do_move)
-                # 双击最大化/还原
-                self.title_label.bind("<Double-Button-1>", lambda e: self.toggle_maximize())
-                print("标题标签拖动事件已重新绑定")
-            
-            # 4. 重新设置窗口图标
-            self.set_window_icon()
-            
-            print("窗口已显示，自定义标题栏已恢复")
-            
-        except Exception as e:
-            print(f"显示窗口失败: {e}")
-    
-    def hide_window(self, icon=None, item=None):
-        """隐藏窗口到托盘"""
-        try:
-            self.master.withdraw()
-            self.is_minimized_to_tray = True
-            print("窗口已隐藏到托盘")
-        except Exception as e:
-            print(f"隐藏窗口失败: {e}")
-    
-    def show_about(self, icon=None, item=None):
-        """显示关于信息"""
-        about_msg = (
-            "Git Merge Tool v1.0\n\n"
-            "简化Git分支合并流程的GUI工具\n\n"
-            "Windows 11 系统托盘使用提示：\n"
-            "1. 右键点击任务栏空白处，选择'任务栏设置'\n"
-            "2. 在'系统托盘区域'中开启'Git Merge Tool'显示\n"
-            "3. 或者点击任务栏右下角的'^'按钮查看隐藏图标"
-        )
-        # 显示窗口后再显示消息框
-        self.show_window()
-        self.master.after(100, lambda: messagebox.showinfo("关于 Git Merge Tool", about_msg))
-    
-    def quit_application(self, icon=None, item=None):
-        """退出应用程序"""
-        try:
-            print("正在退出应用程序...")
-            
-            # 停止托盘图标
-            if self.tray_icon and self.tray_running:
-                self.tray_icon.stop()
-                self.tray_running = False
-                print("托盘图标已停止")
-            
-            # 关闭窗口
-            self.close_window()
-        except Exception as e:
-            print(f"退出应用程序失败: {e}")
-            # 强制退出
-            os._exit(0)
-    
-    def minimize_window(self):
-        """最小化窗口到任务栏（修复任务栏图标不显示问题）"""
-        try:
-            # 显示提示信息（只在第一次最小化时显示）
-            if not hasattr(self, '_minimize_tip_shown'):
-                self._minimize_tip_shown = True
-                self.append_output(
-                    "程序已最小化到任务栏\n"
-                    "点击任务栏图标可恢复窗口\n", 
-                    "info"
-                )
-            
-            # 1. 临时恢复系统默认窗口样式（允许任务栏显示）
-            self.master.overrideredirect(False)
-            print("已临时恢复系统窗口样式以支持任务栏显示")
-            
-            # 2. 确保窗口图标已设置（任务栏图标依赖此设置）
-            self.set_window_icon()
-            
-            # 3. 正常最小化到任务栏
-            self.master.iconify()
-            print("窗口已最小化到任务栏，任务栏图标应该正常显示")
-            
-            # 4. 绑定窗口恢复事件
-            self.master.bind('<Map>', self.on_window_restore)
-            
-            # 5. 如果需要同时显示托盘图标，保留原有托盘逻辑
-            if TRAY_AVAILABLE and pystray is not None:
-                if not self.tray_running:
-                    print("托盘图标未运行，尝试重新初始化...")
-                    self.initialize_tray_icon()
-            
-        except Exception as e:
-            print(f"最小化窗口失败: {e}")
-            # 备用方案：直接隐藏窗口
-            try:
-                self.master.withdraw()
-                print("使用备用方案隐藏窗口")
-            except Exception as e2:
-                print(f"备用方案也失败: {e2}")
-    
-    def toggle_maximize(self):
-        """切换最大化/还原窗口"""
-        if self.is_maximized:
-            # 还原窗口
-            self.master.geometry(self.normal_geometry)
-            self.maximize_btn.config(text="□")
-            self.is_maximized = False
-        else:
-            # 保存当前尺寸和位置
-            self.normal_geometry = self.master.geometry()
-            # 获取屏幕尺寸
-            screen_width = self.master.winfo_screenwidth()
-            screen_height = self.master.winfo_screenheight()
-            # 设置窗口为全屏尺寸
-            self.master.geometry(f"{screen_width}x{screen_height}+0+0")
-            self.maximize_btn.config(text="▢")
-            self.is_maximized = True
-    
-    def on_window_restore(self, event):
-        """窗口恢复时的事件处理 - 修复任务栏恢复后自定义标题栏"""
-        try:
-            print("检测到窗口恢复事件")
-            
-            # 延迟处理，确保窗口完全恢复后再应用自定义样式
-            self.master.after(100, self.restore_custom_titlebar)
-            
-            # 解绑事件防止重复触发
-            self.master.unbind('<Map>')
-            
-            self.is_minimized_to_tray = False
-            print("窗口恢复事件处理完成")
-            
-        except Exception as e:
-            print(f"窗口恢复处理失败: {e}")
-    
-    def restore_custom_titlebar(self):
-        """恢复自定义标题栏 - 从任务栏恢复时调用"""
-        try:
-            # 1. 重新隐藏默认标题栏
-            self.master.overrideredirect(True)
-            print("已恢复自定义标题栏")
-            
-            # 2. 重新绑定标题栏拖动事件
-            if hasattr(self, 'titlebar'):
-                self.titlebar.bind("<Button-1>", self.start_move)
-                self.titlebar.bind("<B1-Motion>", self.do_move)
-                self.titlebar.bind("<Double-Button-1>", lambda e: self.toggle_maximize())
-                print("标题栏事件已重新绑定")
-            
-            if hasattr(self, 'title_label'):
-                self.title_label.bind("<Button-1>", self.start_move)
-                self.title_label.bind("<B1-Motion>", self.do_move)
-                self.title_label.bind("<Double-Button-1>", lambda e: self.toggle_maximize())
-                print("标题标签事件已重新绑定")
-            
-            # 3. 重新设置窗口图标
-            self.set_window_icon()
-            
-            print("自定义标题栏恢复完成")
-            
-        except Exception as e:
-            print(f"恢复自定义标题栏失败: {e}")
-    
+            pass  # 图标文件不存在，跳过图标设置
+
+
     def on_window_close(self):
-        """处理窗口关闭事件（点击X按钮）"""
-        # 按照用户要求，点击X按钮就是彻底关闭程序
+        """处理窗口关闭事件（点击系统关闭按钮）"""
+        # 直接关闭程序
         self.close_window()
     
-    def initialize_tray_icon(self):
-        """初始化系统托盘图标 - 程序启动时调用"""
-        if TRAY_AVAILABLE and pystray is not None:
-            try:
-                print("正在初始化系统托盘图标...")
-                self.tray_icon = self.create_tray_icon()
-                if self.tray_icon:
-                    # 在后台线程中运行托盘图标
-                    def run_tray():
-                        try:
-                            self.tray_running = True
-                            print("系统托盘图标已启动")
-                            if self.tray_icon is not None:
-                                self.tray_icon.run()
-                        except Exception as e:
-                            print(f"托盘图标运行失败: {e}")
-                        finally:
-                            self.tray_running = False
-                    
-                    tray_thread = threading.Thread(target=run_tray, daemon=True)
-                    tray_thread.start()
-                    print("托盘图标线程已启动")
-                    
-                    # 启动时显示提示信息
-                    if not hasattr(self, '_startup_tip_shown'):
-                        self._startup_tip_shown = True
-                        # 延迟显示提示，让界面先完全加载
-                        self.master.after(2000, self.show_startup_tray_tip)
-                else:
-                    print("托盘图标创建失败")
-            except Exception as e:
-                print(f"初始化托盘图标失败: {e}")
-        else:
-            print("系统托盘功能不可用，跳过托盘图标初始化")
-    
-    def show_startup_tray_tip(self):
-        """显示启动时的托盘提示信息"""
-        try:
-            self.append_output(
-                "Git Merge Tool 已启动！\n"
-                "info"
-            )
-        except Exception as e:
-            print(f"显示启动提示失败: {e}")
+
     
     def close_window(self):
-        """关闭窗口 - Windows 11优化版本"""
+        """关闭窗口"""
         try:
-            print("正在关闭窗口...")
-            
-            # 清理托盘图标
-            if self.tray_icon and self.tray_running:
-                try:
-                    self.tray_icon.stop()
-                    self.tray_running = False
-                    print("托盘图标已清理")
-                except Exception as e:
-                    print(f"清理托盘图标失败: {e}")
-            
             # 关闭窗口
             self.master.quit()
             self.master.destroy()
-            print("窗口已关闭")
             
         except Exception as e:
             print(f"关闭窗口失败: {e}")
@@ -715,26 +249,7 @@ class GitMergeGUI:
             except:
                 pass
     
-    def start_move(self, event):
-        """开始拖动窗口"""
-        self.start_x = event.x_root
-        self.start_y = event.y_root
-    
-    def do_move(self, event):
-        """拖动窗口"""
-        if self.is_maximized:
-            # 在最大化状态下拖动时，先还原窗口
-            self.toggle_maximize()
-            # 重新设置拖动起始点
-            self.start_x = event.x_root
-            self.start_y = event.y_root
-            return
-            
-        x = self.master.winfo_x() + (event.x_root - self.start_x)
-        y = self.master.winfo_y() + (event.y_root - self.start_y)
-        self.master.geometry(f"+{x}+{y}")
-        self.start_x = event.x_root
-        self.start_y = event.y_root
+
     
     def process_queue(self):
         """处理消息队列"""
@@ -1389,12 +904,9 @@ class GitMergeGUI:
 
 if __name__ == "__main__":
     try:
-        print("正在启动应用程序...")
         root = tk.Tk()
         gui = GitMergeGUI(root)
-        print("应用程序界面初始化完成")
         root.mainloop()
-        print("应用程序正常退出")
     except Exception as e:
         print(f"应用程序启动失败: {e}")
         import traceback
