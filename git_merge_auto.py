@@ -48,14 +48,22 @@ def run_git_command(cmd, error_msg, allow_conflict=False, timeout=60):
         print(f">>> 正在执行: {cmd}")
         sys.stdout.flush()
         
-        # 使用Popen实现实时输出
+        # 设置Git环境变量以使用UTF-8编码
+        env = os.environ.copy()
+        env['LC_ALL'] = 'C.UTF-8'
+        env['LANG'] = 'C.UTF-8'
+        
+        # 使用Popen实现实时输出，指定编码为utf-8
         process = subprocess.Popen(
             cmd, 
             shell=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,  # 将stderr重定向到stdout以实现实时输出
             universal_newlines=True,
-            bufsize=1  # 行缓冲
+            encoding='utf-8',
+            errors='replace',  # 遇到编码错误时替换为占位符
+            bufsize=1,  # 行缓冲
+            env=env
         )
         
         # 实时读取输出
