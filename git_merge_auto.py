@@ -32,7 +32,7 @@ def output_status(status_dict):
 
 def run_git_command(cmd, error_msg, allow_conflict=False, timeout=60):
     """
-    执行git命令，添加超时机制
+    执行git命令，添加超时机制，支持实时输出
     
     Args:
         cmd: 要执行的命令
@@ -40,26 +40,56 @@ def run_git_command(cmd, error_msg, allow_conflict=False, timeout=60):
         allow_conflict: 是否允许冲突
         timeout: 超时时间（秒），默认60秒
     """
+    stdout_lines = []
+    stderr_lines = []
+    process = None
+    
     try:
         print(f">>> 正在执行: {cmd}")
         sys.stdout.flush()
         
-        # 添加超时机制
-        result = subprocess.run(cmd, check=True, shell=True,
-                              stdout=subprocess.PIPE,
-                              stderr=subprocess.PIPE,
-                              timeout=timeout)
+        # 使用Popen实现实时输出
+        process = subprocess.Popen(
+            cmd, 
+            shell=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,  # 将stderr重定向到stdout以实现实时输出
+            universal_newlines=True,
+            bufsize=1  # 行缓冲
+        )
         
-        # 统一使用utf-8解码，失败时使用replace策略
-        stdout = result.stdout.decode('utf-8', errors='replace')
-        stderr = result.stderr.decode('utf-8', errors='replace')
+        # 实时读取输出
+        try:
+            while True:
+                if process.stdout is None:
+                    break
+                output = process.stdout.readline()
+                if output == '' and process.poll() is not None:
+                    break
+                if output:
+                    line = output.rstrip()
+                    print(line)  # 实时打印输出
+                    sys.stdout.flush()
+                    stdout_lines.append(line)
+            
+            # 等待进程完成，设置超时
+            return_code = process.wait(timeout=timeout)
+            
+        except subprocess.TimeoutExpired:
+            if process:
+                process.kill()
+                process.wait()
+            raise subprocess.TimeoutExpired(cmd, timeout)
         
-        if stdout:
-            print(stdout)
-            sys.stdout.flush()
+        stdout_output = '\n'.join(stdout_lines)
+        stderr_output = '\n'.join(stderr_lines)
+        
+        # 检查返回码
+        if return_code != 0:
+            raise subprocess.CalledProcessError(return_code, cmd, stdout_output, stderr_output)
             
         return subprocess.CompletedProcess(
-            result.args, result.returncode, stdout, stderr
+            cmd, return_code, stdout_output, stderr_output
         )
         
     except subprocess.TimeoutExpired as e:
@@ -73,24 +103,28 @@ def run_git_command(cmd, error_msg, allow_conflict=False, timeout=60):
         )
         
     except subprocess.CalledProcessError as e:
-        err_msg = e.stderr.decode('utf-8', errors='replace') if e.stderr else ""
+        # 对于实时输出的情况，错误信息已经在stdout中
+        stdout_output = '\n'.join(stdout_lines)
+        stderr_output = '\n'.join(stderr_lines)
         
-        # 如果允许冲突，且是rebase或merge冲突，则返回特殊状态码
-        if allow_conflict and ("CONFLICT" in err_msg or "git rebase --continue" in err_msg or "git merge --continue" in err_msg):
+        # 检查是否是冲突相关的错误
+        combined_output = stdout_output + stderr_output
+        if allow_conflict and ("CONFLICT" in combined_output or 
+                              "git rebase --continue" in combined_output or 
+                              "git merge --continue" in combined_output):
             log_warning(f"{error_msg}")
-            log_warning(f"{err_msg}")
             log_warning("检测到冲突，请手动解决冲突后，在界面上点击'继续'按钮...")
             return subprocess.CompletedProcess(
-                e.cmd, 10, e.stdout.decode('utf-8', errors='replace') if e.stdout else "", err_msg
+                e.cmd, 10, stdout_output, stderr_output
             )
         
         log_error(f"{error_msg}")
-        log_error(f"{err_msg}")
+        log_error(f"错误码: {e.returncode}")
         if not allow_conflict:
             input("按回车键退出...")
             sys.exit(1)
         return subprocess.CompletedProcess(
-            e.cmd, e.returncode, e.stdout.decode('utf-8', errors='replace') if e.stdout else "", err_msg
+            e.cmd, e.returncode, stdout_output, stderr_output
         )
 
 def execute_git_workflow(project_path):
