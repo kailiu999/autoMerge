@@ -14,24 +14,22 @@ def install_dependencies():
     """安装必要的依赖"""
     print("正在安装构建依赖...")
     
+    dependencies = [
+        ("pyinstaller", "PyInstaller"),
+        ("pillow", "Pillow"),
+        ("pystray", "pystray")
+    ]
+    
     try:
-        # 检查并安装 pyinstaller
-        result = subprocess.run([sys.executable, "-m", "pip", "show", "pyinstaller"], 
-                              capture_output=True, text=True)
-        if result.returncode != 0:
-            print("安装 PyInstaller...")
-            subprocess.run([sys.executable, "-m", "pip", "install", "pyinstaller"], check=True)
-        else:
-            print("PyInstaller 已安装")
-            
-        # 检查并安装 pillow (用于图标处理)
-        result = subprocess.run([sys.executable, "-m", "pip", "show", "pillow"], 
-                              capture_output=True, text=True)
-        if result.returncode != 0:
-            print("安装 Pillow...")
-            subprocess.run([sys.executable, "-m", "pip", "install", "pillow"], check=True)
-        else:
-            print("Pillow 已安装")
+        for dep_name, display_name in dependencies:
+            # 检查是否已安装
+            result = subprocess.run([sys.executable, "-m", "pip", "show", dep_name], 
+                                  capture_output=True, text=True)
+            if result.returncode != 0:
+                print(f"安装 {display_name}...")
+                subprocess.run([sys.executable, "-m", "pip", "install", dep_name], check=True)
+            else:
+                print(f"{display_name} 已安装")
             
     except subprocess.CalledProcessError as e:
         print(f"安装依赖失败: {e}")
@@ -136,9 +134,26 @@ def build_executable():
     try:
         # 清理之前的构建
         if os.path.exists('build'):
-            shutil.rmtree('build')
+            try:
+                shutil.rmtree('build')
+            except PermissionError:
+                print("警告: 无法删除 build 目录，可能有文件正在使用")
+                
         if os.path.exists('dist'):
-            shutil.rmtree('dist')
+            try:
+                shutil.rmtree('dist')
+            except PermissionError:
+                print("警告: 无法删除 dist 目录，可能有文件正在使用")
+                print("请确保关闭所有 GitMergeTool.exe 进程后重试")
+                # 尝试删除具体的exe文件
+                exe_path = 'dist/GitMergeTool.exe'
+                if os.path.exists(exe_path):
+                    try:
+                        os.remove(exe_path)
+                        print("已删除旧的exe文件")
+                    except PermissionError:
+                        print(f"错误: 无法删除 {exe_path}，请手动关闭该程序后重试")
+                        return False
         
         # 运行 PyInstaller
         cmd = [sys.executable, "-m", "PyInstaller", "GitMergeTool.spec", "--clean"]
