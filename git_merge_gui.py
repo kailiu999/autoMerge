@@ -10,6 +10,17 @@ import importlib.util
 import io
 from contextlib import redirect_stdout, redirect_stderr
 
+def debug_print(message):
+    """在开发环境中显示调试信息，在打包环境中静默"""
+    if not hasattr(sys, '_MEIPASS'):
+        print(message)
+
+def get_subprocess_flags():
+    """获取subprocess的创建标志，在打包环境中隐藏控制台"""
+    if hasattr(sys, '_MEIPASS') and os.name == 'nt':
+        return subprocess.CREATE_NO_WINDOW
+    return 0
+
 class GitMergeGUI:
     def __init__(self, master):
         self.master = master
@@ -196,7 +207,8 @@ class GitMergeGUI:
                 ['git', 'branch', '-r'],
                 capture_output=True,
                 text=True,
-                timeout=10
+                timeout=10,
+                creationflags=get_subprocess_flags()
             )
             
             if result.returncode == 0:
@@ -219,7 +231,9 @@ class GitMergeGUI:
                 return ["develop"]
                 
         except Exception as e:
-            print(f"获取远程分支失败: {e}")
+            # 在打包环境中静默失败，开发环境中显示错误
+            if not hasattr(sys, '_MEIPASS'):
+                print(f"获取远程分支失败: {e}")
             return ["develop"]
         finally:
             try:
@@ -273,7 +287,9 @@ class GitMergeGUI:
             else:
                 return None
         except Exception as e:
-            print(f"获取图标路径失败: {e}")
+            # 在打包环境中静默失败，开发环境中显示错误
+            if not hasattr(sys, '_MEIPASS'):
+                print(f"获取图标路径失败: {e}")
             return None
     
     def set_window_icon(self):
@@ -305,13 +321,17 @@ class GitMergeGUI:
                         pass
                     
             except Exception as e:
-                print(f"设置窗口图标失败: {e}")
+                # 在打包环境中静默失败，开发环境中显示错误
+                if not hasattr(sys, '_MEIPASS'):
+                    print(f"设置窗口图标失败: {e}")
                 # 备用方案
                 try:
                     # 尝试使用wm_iconbitmap
                     self.master.wm_iconbitmap(self.icon_path)
                 except Exception as e2:
-                    print(f"wm_iconbitmap也失败: {e2}")
+                    # 在打包环境中静默失败，开发环境中显示错误
+                    if not hasattr(sys, '_MEIPASS'):
+                        print(f"wm_iconbitmap也失败: {e2}")
         else:
             pass  # 图标文件不存在，跳过图标设置
 
@@ -331,7 +351,9 @@ class GitMergeGUI:
             self.master.destroy()
             
         except Exception as e:
-            print(f"关闭窗口失败: {e}")
+            # 在打包环境中静默失败，开发环境中显示错误
+            if not hasattr(sys, '_MEIPASS'):
+                print(f"关闭窗口失败: {e}")
             # 强制退出
             try:
                 os._exit(0)
@@ -473,7 +495,8 @@ class GitMergeGUI:
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     universal_newlines=True,
-                    bufsize=1  # 行缓冲
+                    bufsize=1,  # 行缓冲
+                    creationflags=get_subprocess_flags()
                 )
                 
                 # 实时读取输出
@@ -593,7 +616,9 @@ class GitMergeGUI:
                         if 'name' in tag and 'path' in tag:
                             self.add_quick_tag(tag['name'], tag['path'], save_config=False)
         except Exception as e:
-            print(f"加载配置文件失败: {e}")
+            # 在打包环境中静默失败，开发环境中显示错误
+            if not hasattr(sys, '_MEIPASS'):
+                print(f"加载配置文件失败: {e}")
             # 如果加载失败，添加一个默认标签
             self.add_quick_tag("urban-lifeline-web", "C:\\Users\\Mrliu\\Desktop\\project\\Urban-lifeline")
     
@@ -609,7 +634,9 @@ class GitMergeGUI:
             with open(self.config_file, 'w', encoding='utf-8') as f:
                 json.dump(config, f, ensure_ascii=False, indent=2)
         except Exception as e:
-            print(f"保存配置文件失败: {e}")
+            # 在打包环境中静默失败，开发环境中显示错误
+            if not hasattr(sys, '_MEIPASS'):
+                print(f"保存配置文件失败: {e}")
     
     def add_quick_tag(self, name, path, save_config=True):
         """添加快捷标签"""
@@ -999,12 +1026,34 @@ class GitMergeGUI:
             self.create_tag_widget(name, path)
 
 if __name__ == "__main__":
+    # 在 Windows 上隐藏控制台窗口（仅在打包环境中）
+    if hasattr(sys, '_MEIPASS') and os.name == 'nt':
+        try:
+            import ctypes
+            # 隐藏控制台窗口
+            ctypes.windll.user32.ShowWindow(ctypes.windll.kernel32.GetConsoleWindow(), 0)
+        except:
+            pass  # 静默失败
+    
     try:
         root = tk.Tk()
         gui = GitMergeGUI(root)
         root.mainloop()
     except Exception as e:
-        print(f"应用程序启动失败: {e}")
-        import traceback
-        traceback.print_exc()
-        input("按Enter键退出...")
+        # 在打包环境中，避免显示控制台
+        if hasattr(sys, '_MEIPASS'):
+            # 打包后的错误处理 - 写入日志文件而不是显示控制台
+            try:
+                import traceback
+                error_log = os.path.join(os.path.dirname(sys.executable), "error.log")
+                with open(error_log, "w", encoding="utf-8") as f:
+                    f.write(f"应用程序启动失败: {e}\n")
+                    f.write(traceback.format_exc())
+            except:
+                pass  # 静默失败
+        else:
+            # 开发环境下的错误处理
+            print(f"应用程序启动失败: {e}")
+            import traceback
+            traceback.print_exc()
+            input("按Enter键退出...")

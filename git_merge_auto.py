@@ -10,6 +10,12 @@ COLOR_GREEN = "\033[32m"
 COLOR_YELLOW = "\033[33m"
 COLOR_RESET = "\033[0m"
 
+def get_subprocess_flags():
+    """获取subprocess的创建标志，在打包环境中隐藏控制台"""
+    if hasattr(sys, '_MEIPASS') and os.name == 'nt':
+        return subprocess.CREATE_NO_WINDOW
+    return 0
+
 def log_error(message):
     """记录错误信息"""
     print(f"{COLOR_RED}[ERROR] {message}{COLOR_RESET}")
@@ -63,7 +69,8 @@ def run_git_command(cmd, error_msg, allow_conflict=False, timeout=60):
             encoding='utf-8',
             errors='replace',  # 遇到编码错误时替换为占位符
             bufsize=1,  # 行缓冲
-            env=env
+            env=env,
+            creationflags=get_subprocess_flags()
         )
         
         # 实时读取输出
@@ -129,7 +136,9 @@ def run_git_command(cmd, error_msg, allow_conflict=False, timeout=60):
         log_error(f"{error_msg}")
         log_error(f"错误码: {e.returncode}")
         if not allow_conflict:
-            input("按回车键退出...")
+            # 在打包环境中不显示 input 提示
+            if not hasattr(sys, '_MEIPASS'):
+                input("按回车键退出...")
             sys.exit(1)
         return subprocess.CompletedProcess(
             e.cmd, e.returncode, stdout_output, stderr_output
@@ -284,7 +293,9 @@ def main():
     if len(sys.argv) < 2:
         log_error("请传入项目路径作为参数！")
         print(f"用法: python {os.path.basename(__file__)} \"项目路径\" [--target-branch 目标分支]")
-        input("按回车键退出...")
+        # 在打包环境中不显示 input 提示
+        if not hasattr(sys, '_MEIPASS'):
+            input("按回车键退出...")
         sys.exit(1)
         
     project_path = sys.argv[1]
