@@ -74,6 +74,18 @@ class GitMergeGUI:
                                  highlightbackground="#dcdfe6", relief=tk.FLAT)
         self.path_entry.pack(fill=tk.X, pady=(0, 10))
         
+        # 目标分支选择
+        self.branch_label = tk.Label(self.top_frame, text="目标分支:", font=("Helvetica", 14), fg="#606266", cursor="hand2")
+        self.branch_label.pack(anchor=tk.W, pady=(0, 5))
+        
+        self.branch_combobox = ttk.Combobox(self.top_frame, width=47, font=("Helvetica", 14), state="readonly")
+        self.branch_combobox.pack(fill=tk.X, pady=(0, 10))
+        self.branch_combobox.set("develop")  # 默认选择develop分支
+        
+        # 绑定路径输入框变化事件来刷新分支列表
+        self.path_entry.bind('<FocusOut>', self.on_path_change)
+        self.path_entry.bind('<Return>', self.on_path_change)
+        
         # 按钮容器
         self.button_frame = tk.Frame(self.top_frame, bg="#ffffff")
         self.button_frame.pack(fill=tk.X, pady=(5, 0))
@@ -169,6 +181,83 @@ class GitMergeGUI:
     
 
     
+    def get_remote_branches(self, project_path):
+        """获取远程分支列表"""
+        if not project_path or not os.path.exists(project_path):
+            return ["develop"]  # 默认返回 develop
+        
+        original_cwd = os.getcwd()  # 在函数开始时获取
+        try:
+            # 切换到项目目录
+            os.chdir(project_path)
+            
+            # 获取远程分支
+            result = subprocess.run(
+                ['git', 'branch', '-r'],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            
+            if result.returncode == 0:
+                branches = []
+                for line in result.stdout.strip().split('\n'):
+                    line = line.strip()
+                    if line and not line.startswith('origin/HEAD'):
+                        # 移除 origin/ 前缀
+                        if line.startswith('origin/'):
+                            branch_name = line[7:]  # 移除 'origin/' 前缀
+                            if branch_name:  # 确保不为空
+                                branches.append(branch_name)
+                
+                # 如果没有获取到分支，返回默认值
+                if not branches:
+                    branches = ["develop"]
+                
+                return sorted(set(branches))  # 去重并排序
+            else:
+                return ["develop"]
+                
+        except Exception as e:
+            print(f"获取远程分支失败: {e}")
+            return ["develop"]
+        finally:
+            try:
+                os.chdir(original_cwd)
+            except:
+                pass
+    
+    def refresh_branches(self, project_path):
+        """刷新分支列表"""
+        branches = self.get_remote_branches(project_path)
+        self.branch_combobox['values'] = branches
+        
+        # 如果当前选中的分支不在列表中，设置为第一个分支
+        current_selection = self.branch_combobox.get()
+        if current_selection not in branches:
+            self.branch_combobox.set(branches[0] if branches else "develop")
+    
+    def on_path_change(self, event=None):
+        """路径变化时的事件处理"""
+        project_path = self.path_entry.get().strip()
+        if project_path:
+            # 在后台线程中刷新分支列表，避免阻塞 UI
+            threading.Thread(
+                target=lambda: self.master.after(0, lambda: self.refresh_branches(project_path)),
+                daemon=True
+            ).start()
+        else:
+            # 如果路径为空，重置分支列表为默认值
+            self.branch_combobox['values'] = ["develop"]
+            self.branch_combobox.set("develop")
+
+    def select_project_path(self, path):
+        """选择项目路径并刷新分支列表"""
+        self.path_entry.delete(0, tk.END)
+        self.path_entry.insert(0, path)
+        # 自动刷新分支列表
+        self.on_path_change()
+
     def get_icon_path(self):
         """获取图标文件路径"""
         try:
@@ -280,8 +369,14 @@ class GitMergeGUI:
             return
             
         project_path = self.path_entry.get()
+        target_branch = self.branch_combobox.get().strip()
+        
         if not project_path:
             self.append_output("请先输入项目路径！\n", "error")
+            return
+        
+        if not target_branch:
+            self.append_output("请选择目标分支！\n", "error")
             return
         
         self.reset_state()
@@ -299,18 +394,19 @@ class GitMergeGUI:
                 self.add_quick_tag(name, project_path)  # 使用原始路径
         
         self.append_output(f"正在执行合并操作，项目路径: {project_path}\n")
+        self.append_output(f"目标分支: {target_branch}\n")
         
         # 在新线程中执行任务
         self.worker_thread = threading.Thread(
             target=self.execute_git_task,
-            args=(project_path,),
+            args=(project_path, target_branch),
             daemon=True
         )
         self.worker_thread.start()
     
 
     
-    def execute_git_task(self, project_path):
+    def execute_git_task(self, project_path, target_branch="develop"):
         """在后台线程中执行git任务"""
         try:
             # 在打包环境中直接导入并执行git_merge_auto模块，避免启动新进程
@@ -335,10 +431,10 @@ class GitMergeGUI:
                 with redirect_stdout(stdout_capture), redirect_stderr(stderr_capture):
                     # 模拟命令行参数
                     original_argv = sys.argv.copy()
-                    sys.argv = ['git_merge_auto.py', project_path]
+                    sys.argv = ['git_merge_auto.py', project_path, '--target-branch', target_branch]
                     
                     try:
-                        result = git_merge_auto.execute_git_workflow(project_path)
+                        result = git_merge_auto.execute_git_workflow(project_path, target_branch)
                         success = bool(result) and result is not False
                     except Exception as e:
                         self.message_queue.put({"type": "error", "error": str(e)})
@@ -369,7 +465,7 @@ class GitMergeGUI:
                 
             else:
                 # 开发环境，使用子进程
-                cmd = [sys.executable, "git_merge_auto.py", project_path]
+                cmd = [sys.executable, "git_merge_auto.py", project_path, "--target-branch", target_branch]
                 
                 # 启动进程
                 self.current_process = subprocess.Popen(
@@ -556,7 +652,7 @@ class GitMergeGUI:
         tag_button = tk.Button(
             tag_frame,
             text=name,
-            command=lambda: [self.path_entry.delete(0, tk.END), self.path_entry.insert(0, path)],
+            command=lambda p=path: self.select_project_path(p),
             bg="#ecf5ff",
             fg="#409eff",
             relief=tk.FLAT,

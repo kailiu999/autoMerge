@@ -135,7 +135,7 @@ def run_git_command(cmd, error_msg, allow_conflict=False, timeout=60):
             e.cmd, e.returncode, stdout_output, stderr_output
         )
 
-def execute_git_workflow(project_path):
+def execute_git_workflow(project_path, target_branch="develop"):
     """执行git工作流程"""
     try:
         os.chdir(project_path)
@@ -156,7 +156,7 @@ def execute_git_workflow(project_path):
     # 修改检查未提交改动的方式
     try:
         result = run_git_command(
-            f'git log {current_branch} --not origin/develop --oneline',
+            f'git log {current_branch} --not origin/{target_branch} --oneline',
             "检查本地提交失败",
             timeout=10
         )
@@ -168,17 +168,18 @@ def execute_git_workflow(project_path):
         return False
     
     if not local_commits:
-        log_success(f"当前分支 {current_branch} 没有需要同步到develop的改动，无需操作")
+        log_success(f"当前分支 {current_branch} 没有需要同步到{target_branch}的改动，无需操作")
         return True
 
     print(f"\n当前分支: {current_branch}")
+    print(f"目标分支: {target_branch}")
     print(f"开始时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
     sys.stdout.flush()
     
     # 执行git操作流程
     commands = [
-        ("git pull --rebase origin develop", "rebase失败，请手动解决冲突！", True, 120),  # rebase可能需要更长时间
-        ("git switch develop", "切换分支失败！", False, 10),
+        (f"git pull --rebase origin {target_branch}", "rebase失败，请手动解决冲突！", True, 120),  # rebase可能需要更长时间
+        (f"git switch {target_branch}", "切换分支失败！", False, 10),
         ("git pull", "拉取代码失败！", False, 60),
         (f"git merge {current_branch}", "合并失败，请手动解决冲突！", True, 30),
         ("git push", "推送失败！", False, 120),  # push可能需要更长时间
@@ -198,6 +199,7 @@ def execute_git_workflow(project_path):
                 "status": "conflict", 
                 "step": step_index, 
                 "branch": current_branch,
+                "target_branch": target_branch,
                 "command": cmd
             }
             output_status(conflict_info)
@@ -216,7 +218,7 @@ def execute_git_workflow(project_path):
     sys.stdout.flush()
     return True
 
-def continue_after_conflict(project_path, step_index, current_branch):
+def continue_after_conflict(project_path, step_index, current_branch, target_branch="develop"):
     """冲突解决后继续执行"""
     try:
         os.chdir(project_path)
@@ -225,12 +227,13 @@ def continue_after_conflict(project_path, step_index, current_branch):
         return False
     
     print(f"\n继续执行，当前分支: {current_branch}")
+    print(f"目标分支: {target_branch}")
     sys.stdout.flush()
     
     # 执行git操作流程
     commands = [
-        ("git pull --rebase origin develop", "rebase失败，请手动解决冲突！", True, 120),
-        ("git switch develop", "切换分支失败！", False, 10),
+        (f"git pull --rebase origin {target_branch}", "rebase失败，请手动解决冲突！", True, 120),
+        (f"git switch {target_branch}", "切换分支失败！", False, 10),
         ("git pull", "拉取代码失败！", False, 60),
         (f"git merge {current_branch}", "合并失败，请手动解决冲突！", True, 30),
         ("git push", "推送失败！", False, 120),
@@ -258,6 +261,7 @@ def continue_after_conflict(project_path, step_index, current_branch):
                 "status": "conflict", 
                 "step": step_index, 
                 "branch": current_branch,
+                "target_branch": target_branch,
                 "command": cmd
             }
             output_status(conflict_info)
@@ -279,19 +283,36 @@ def continue_after_conflict(project_path, step_index, current_branch):
 def main():
     if len(sys.argv) < 2:
         log_error("请传入项目路径作为参数！")
-        print(f"用法: python {os.path.basename(__file__)} \"项目路径\"")
+        print(f"用法: python {os.path.basename(__file__)} \"项目路径\" [--target-branch 目标分支]")
         input("按回车键退出...")
         sys.exit(1)
         
     project_path = sys.argv[1]
+    target_branch = "develop"  # 默认目标分支
+    
+    # 解析目标分支参数
+    if "--target-branch" in sys.argv:
+        try:
+            target_branch_index = sys.argv.index("--target-branch")
+            if target_branch_index + 1 < len(sys.argv):
+                target_branch = sys.argv[target_branch_index + 1]
+        except (ValueError, IndexError):
+            log_error("无效的 --target-branch 参数")
+            sys.exit(1)
     
     # 检查是否是继续执行模式
     if len(sys.argv) >= 5 and sys.argv[2] == "--continue":
         step_index = int(sys.argv[3])
         current_branch = sys.argv[4]
-        return continue_after_conflict(project_path, step_index, current_branch)
+        
+        # 在继续模式中也支持目标分支参数
+        continue_target_branch = "develop"
+        if len(sys.argv) >= 7 and sys.argv[5] == "--target-branch":
+            continue_target_branch = sys.argv[6]
+        
+        return continue_after_conflict(project_path, step_index, current_branch, continue_target_branch)
     else:
-        return execute_git_workflow(project_path)
+        return execute_git_workflow(project_path, target_branch)
 
 if __name__ == "__main__":
     main()
