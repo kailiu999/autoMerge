@@ -430,6 +430,10 @@ class GitMergeGUI:
     
     def execute_git_task(self, project_path, target_branch="develop"):
         """在后台线程中执行git任务"""
+        
+        def output_callback(text):
+            """实时输出回调函数"""
+            self.message_queue.put({"type": "output", "text": text})
         try:
             # 在打包环境中直接导入并执行git_merge_auto模块，避免启动新进程
             if hasattr(sys, '_MEIPASS'):
@@ -442,46 +446,13 @@ class GitMergeGUI:
                 git_merge_auto = importlib.util.module_from_spec(spec)
                 spec.loader.exec_module(git_merge_auto)
                 
-                # 重定向输出到消息队列
-                import io
-                import contextlib
-                from contextlib import redirect_stdout, redirect_stderr
-                
-                stdout_capture = io.StringIO()
-                stderr_capture = io.StringIO()
-                
-                with redirect_stdout(stdout_capture), redirect_stderr(stderr_capture):
-                    # 模拟命令行参数
-                    original_argv = sys.argv.copy()
-                    sys.argv = ['git_merge_auto.py', project_path, '--target-branch', target_branch]
-                    
-                    try:
-                        result = git_merge_auto.execute_git_workflow(project_path, target_branch)
-                        success = bool(result) and result is not False
-                    except Exception as e:
-                        self.message_queue.put({"type": "error", "error": str(e)})
-                        return
-                    finally:
-                        sys.argv = original_argv
-                
-                # 发送捕获的输出
-                stdout_content = stdout_capture.getvalue()
-                stderr_content = stderr_capture.getvalue()
-                
-                if stdout_content:
-                    for line in stdout_content.splitlines():
-                        if line.startswith("STATUS_JSON:"):
-                            try:
-                                status_json = line.replace("STATUS_JSON:", "").strip()
-                                status_data = json.loads(status_json)
-                                self.message_queue.put({"type": "status", "data": status_data})
-                            except Exception as e:
-                                self.message_queue.put({"type": "output", "text": line + "\n"})
-                        else:
-                            self.message_queue.put({"type": "output", "text": line + "\n"})
-                
-                if stderr_content:
-                    self.message_queue.put({"type": "output", "text": stderr_content})
+                # 直接调用，不重定向输出，使用回调函数实时发送输出
+                try:
+                    result = git_merge_auto.execute_git_workflow(project_path, target_branch, output_callback)
+                    success = bool(result) and result is not False
+                except Exception as e:
+                    self.message_queue.put({"type": "error", "error": str(e)})
+                    return
                 
                 self.message_queue.put({"type": "finished", "success": success})
                 

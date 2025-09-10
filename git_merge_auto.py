@@ -36,7 +36,7 @@ def output_status(status_dict):
     print(f"STATUS_JSON:{json.dumps(status_dict, ensure_ascii=False)}")
     sys.stdout.flush()
 
-def run_git_command(cmd, error_msg, allow_conflict=False, timeout=60):
+def run_git_command(cmd, error_msg, allow_conflict=False, timeout=60, output_callback=None):
     """
     执行git命令，添加超时机制，支持实时输出
     
@@ -51,8 +51,13 @@ def run_git_command(cmd, error_msg, allow_conflict=False, timeout=60):
     process = None
     
     try:
-        print(f">>> 正在执行: {cmd}")
+        step_msg = f">>> 正在执行: {cmd}"
+        print(step_msg)
         sys.stdout.flush()
+        
+        # 如果有回调函数，立即发送步骤信息到GUI
+        if output_callback:
+            output_callback(step_msg + "\n")
         
         # 设置Git环境变量以使用UTF-8编码
         env = os.environ.copy()
@@ -86,6 +91,10 @@ def run_git_command(cmd, error_msg, allow_conflict=False, timeout=60):
                     print(line)  # 实时打印输出
                     sys.stdout.flush()
                     stdout_lines.append(line)
+                    
+                    # 如果有回调函数，实时发送输出到GUI
+                    if output_callback:
+                        output_callback(line + "\n")
             
             # 等待进程完成，设置超时
             return_code = process.wait(timeout=timeout)
@@ -144,7 +153,7 @@ def run_git_command(cmd, error_msg, allow_conflict=False, timeout=60):
             e.cmd, e.returncode, stdout_output, stderr_output
         )
 
-def execute_git_workflow(project_path, target_branch="develop"):
+def execute_git_workflow(project_path, target_branch="develop", output_callback=None):
     """执行git工作流程"""
     try:
         os.chdir(project_path)
@@ -154,7 +163,7 @@ def execute_git_workflow(project_path, target_branch="develop"):
     
     # 获取当前分支名称
     try:
-        result = run_git_command('git rev-parse --abbrev-ref HEAD', "获取分支名称失败", timeout=10)
+        result = run_git_command('git rev-parse --abbrev-ref HEAD', "获取分支名称失败", timeout=10, output_callback=output_callback)
         if result.returncode != 0:
             return False
         current_branch = result.stdout.strip()
@@ -167,7 +176,8 @@ def execute_git_workflow(project_path, target_branch="develop"):
         result = run_git_command(
             f'git log {current_branch} --not origin/{target_branch} --oneline',
             "检查本地提交失败",
-            timeout=10
+            timeout=10,
+            output_callback=output_callback
         )
         if result.returncode != 0:
             return False
@@ -180,26 +190,37 @@ def execute_git_workflow(project_path, target_branch="develop"):
         log_success(f"当前分支 {current_branch} 没有需要同步到{target_branch}的改动，无需操作")
         return True
 
-    print(f"\n当前分支: {current_branch}")
-    print(f"目标分支: {target_branch}")
-    print(f"开始时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+    workflow_info = f"\n当前分支: {current_branch}\n目标分支: {target_branch}\n开始时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+    print(workflow_info)
     sys.stdout.flush()
+    
+    # 发送工作流信息到GUI
+    if output_callback:
+        output_callback(workflow_info)
     
     # 执行git操作流程
     commands = [
-        (f"git pull --rebase origin {target_branch}", "rebase失败，请手动解决冲突！", True, 120),  # rebase可能需要更长时间
-        (f"git switch {target_branch}", "切换分支失败！", False, 10),
-        ("git pull", "拉取代码失败！", False, 60),
-        (f"git merge {current_branch}", "合并失败，请手动解决冲突！", True, 30),
-        ("git push", "推送失败！", False, 120),  # push可能需要更长时间
-        (f"git switch {current_branch}", "切换回原分支失败！", False, 10)
+        (f"git pull --rebase origin {target_branch}", "rebase失败，请手动解决冲突！", True, 120, f"步骤1/6: 从{target_branch}分支拉取最新代码并rebase当前分支"),
+        (f"git switch {target_branch}", "切换分支失败！", False, 10, f"步骤2/6: 切换到{target_branch}分支"),
+        ("git pull", "拉取代码失败！", False, 60, f"步骤3/6: 拉取{target_branch}分支最新代码"),
+        (f"git merge {current_branch}", "合并失败，请手动解决冲突！", True, 30, f"步骤4/6: 将{current_branch}分支合并到{target_branch}"),
+        ("git push", "推送失败！", False, 120, f"步骤5/6: 推送更新后的{target_branch}分支到远程仓库"),
+        (f"git switch {current_branch}", "切换回原分支失败！", False, 10, f"步骤6/6: 切换回原开发分支{current_branch}")
     ]
     
     # 记录当前执行到的步骤索引
     step_index = 0
     while step_index < len(commands):
-        cmd, error_msg, allow_conflict, timeout = commands[step_index]
-        result = run_git_command(cmd, error_msg, allow_conflict, timeout)
+        cmd, error_msg, allow_conflict, timeout, step_desc = commands[step_index]
+        
+        # 输出步骤描述
+        step_info = f"\n=== {step_desc} ===\n"
+        print(step_info)
+        sys.stdout.flush()
+        if output_callback:
+            output_callback(step_info)
+        
+        result = run_git_command(cmd, error_msg, allow_conflict, timeout, output_callback)
         
         # 检查是否遇到冲突
         if result.returncode == 10:  # 自定义状态码，表示冲突
@@ -227,7 +248,7 @@ def execute_git_workflow(project_path, target_branch="develop"):
     sys.stdout.flush()
     return True
 
-def continue_after_conflict(project_path, step_index, current_branch, target_branch="develop"):
+def continue_after_conflict(project_path, step_index, current_branch, target_branch="develop", output_callback=None):
     """冲突解决后继续执行"""
     try:
         os.chdir(project_path)
@@ -235,33 +256,44 @@ def continue_after_conflict(project_path, step_index, current_branch, target_bra
         log_error(f"无法切换到目录: {e}")
         return False
     
-    print(f"\n继续执行，当前分支: {current_branch}")
-    print(f"目标分支: {target_branch}")
+    continue_info = f"\n继续执行，当前分支: {current_branch}\n目标分支: {target_branch}\n"
+    print(continue_info)
     sys.stdout.flush()
+    if output_callback:
+        output_callback(continue_info)
     
     # 执行git操作流程
     commands = [
-        (f"git pull --rebase origin {target_branch}", "rebase失败，请手动解决冲突！", True, 120),
-        (f"git switch {target_branch}", "切换分支失败！", False, 10),
-        ("git pull", "拉取代码失败！", False, 60),
-        (f"git merge {current_branch}", "合并失败，请手动解决冲突！", True, 30),
-        ("git push", "推送失败！", False, 120),
-        (f"git switch {current_branch}", "切换回原分支失败！", False, 10)
+        (f"git pull --rebase origin {target_branch}", "rebase失败，请手动解决冲突！", True, 120, f"步骤1/6: 从{target_branch}分支拉取最新代码并rebase当前分支"),
+        (f"git switch {target_branch}", "切换分支失败！", False, 10, f"步骤2/6: 切换到{target_branch}分支"),
+        ("git pull", "拉取代码失败！", False, 60, f"步骤3/6: 拉取{target_branch}分支最新代码"),
+        (f"git merge {current_branch}", "合并失败，请手动解决冲突！", True, 30, f"步骤4/6: 将{current_branch}分支合并到{target_branch}"),
+        ("git push", "推送失败！", False, 120, f"步骤5/6: 推送更新后的{target_branch}分支到远程仓库"),
+        (f"git switch {current_branch}", "切换回原分支失败！", False, 10, f"步骤6/6: 切换回原开发分支{current_branch}")
     ]
     
     # 从中断的步骤继续执行
     while step_index < len(commands):
-        cmd, error_msg, allow_conflict, timeout = commands[step_index]
+        cmd, error_msg, allow_conflict, timeout, step_desc = commands[step_index]
         
         # 对于第一步rebase冲突后继续
         if step_index == 0 and cmd.startswith("git pull --rebase"):
             cmd = "git rebase --continue"
+            step_desc = f"步骤1/6: 继续 rebase 操作"
         
         # 对于第四步merge冲突后继续
         if step_index == 3 and cmd.startswith("git merge"):
             cmd = "git merge --continue"
+            step_desc = f"步骤4/6: 继续 merge 操作"
         
-        result = run_git_command(cmd, error_msg, allow_conflict, timeout)
+        # 输出步骤描述
+        step_info = f"\n=== {step_desc} ===\n"
+        print(step_info)
+        sys.stdout.flush()
+        if output_callback:
+            output_callback(step_info)
+        
+        result = run_git_command(cmd, error_msg, allow_conflict, timeout, output_callback)
         
         # 检查是否再次遇到冲突
         if result.returncode == 10:  # 自定义状态码，表示冲突
