@@ -16,25 +16,44 @@ def get_subprocess_flags():
         return subprocess.CREATE_NO_WINDOW
     return 0
 
+def safe_flush():
+    """安全地刷新stdout，避免在打包环境中出现NoneType错误"""
+    try:
+        if sys.stdout is not None:
+            sys.stdout.flush()
+    except (AttributeError, OSError):
+        pass  # 静默忽略刷新错误
+
+def safe_print(*args, **kwargs):
+    """安全地打印信息，避免在打包环境中出现错误"""
+    try:
+        if sys.stdout is not None:
+            print(*args, **kwargs)
+        # 如果stdout为None，我们可以尝试写入stderr
+        elif sys.stderr is not None:
+            print(*args, file=sys.stderr, **kwargs)
+    except (AttributeError, OSError):
+        pass  # 静默忽略打印错误
+
 def log_error(message):
     """记录错误信息"""
-    print(f"{COLOR_RED}[ERROR] {message}{COLOR_RESET}")
-    sys.stdout.flush()
+    safe_print(f"{COLOR_RED}[ERROR] {message}{COLOR_RESET}")
+    safe_flush()
 
 def log_success(message):
     """记录成功信息"""
-    print(f"{COLOR_GREEN}[SUCCESS] {message}{COLOR_RESET}")
-    sys.stdout.flush()
+    safe_print(f"{COLOR_GREEN}[SUCCESS] {message}{COLOR_RESET}")
+    safe_flush()
 
 def log_warning(message):
     """记录警告信息"""
-    print(f"{COLOR_YELLOW}[WARNING] {message}{COLOR_RESET}")
-    sys.stdout.flush()
+    safe_print(f"{COLOR_YELLOW}[WARNING] {message}{COLOR_RESET}")
+    safe_flush()
 
 def output_status(status_dict):
     """输出状态信息到stdout，供GUI解析"""
-    print(f"STATUS_JSON:{json.dumps(status_dict, ensure_ascii=False)}")
-    sys.stdout.flush()
+    safe_print(f"STATUS_JSON:{json.dumps(status_dict, ensure_ascii=False)}")
+    safe_flush()
 
 def run_git_command(cmd, error_msg, allow_conflict=False, timeout=60, output_callback=None):
     """
@@ -52,8 +71,8 @@ def run_git_command(cmd, error_msg, allow_conflict=False, timeout=60, output_cal
     
     try:
         step_msg = f">>> 正在执行: {cmd}"
-        print(step_msg)
-        sys.stdout.flush()
+        safe_print(step_msg)
+        safe_flush()
         
         # 如果有回调函数，立即发送步骤信息到GUI
         if output_callback:
@@ -88,8 +107,8 @@ def run_git_command(cmd, error_msg, allow_conflict=False, timeout=60, output_cal
                     break
                 if output:
                     line = output.rstrip()
-                    print(line)  # 实时打印输出
-                    sys.stdout.flush()
+                    safe_print(line)  # 实时打印输出
+                    safe_flush()
                     stdout_lines.append(line)
                     
                     # 如果有回调函数，实时发送输出到GUI
@@ -191,8 +210,8 @@ def execute_git_workflow(project_path, target_branch="develop", output_callback=
         return True
 
     workflow_info = f"\n当前分支: {current_branch}\n目标分支: {target_branch}\n开始时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-    print(workflow_info)
-    sys.stdout.flush()
+    safe_print(workflow_info)
+    safe_flush()
     
     # 发送工作流信息到GUI
     if output_callback:
@@ -215,8 +234,8 @@ def execute_git_workflow(project_path, target_branch="develop", output_callback=
         
         # 输出步骤描述
         step_info = f"\n=== {step_desc} ===\n"
-        print(step_info)
-        sys.stdout.flush()
+        safe_print(step_info)
+        safe_flush()
         if output_callback:
             output_callback(step_info)
         
@@ -244,8 +263,8 @@ def execute_git_workflow(project_path, target_branch="develop", output_callback=
         step_index += 1
     
     log_success("\n所有操作已完成！")
-    print(f"结束时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    sys.stdout.flush()
+    safe_print(f"结束时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    safe_flush()
     return True
 
 def continue_after_conflict(project_path, step_index, current_branch, target_branch="develop", output_callback=None):
@@ -257,8 +276,8 @@ def continue_after_conflict(project_path, step_index, current_branch, target_bra
         return False
     
     continue_info = f"\n继续执行，当前分支: {current_branch}\n目标分支: {target_branch}\n"
-    print(continue_info)
-    sys.stdout.flush()
+    safe_print(continue_info)
+    safe_flush()
     if output_callback:
         output_callback(continue_info)
     
@@ -288,8 +307,8 @@ def continue_after_conflict(project_path, step_index, current_branch, target_bra
         
         # 输出步骤描述
         step_info = f"\n=== {step_desc} ===\n"
-        print(step_info)
-        sys.stdout.flush()
+        safe_print(step_info)
+        safe_flush()
         if output_callback:
             output_callback(step_info)
         
@@ -317,14 +336,14 @@ def continue_after_conflict(project_path, step_index, current_branch, target_bra
         step_index += 1
     
     log_success("\n所有操作已完成！")
-    print(f"结束时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    sys.stdout.flush()
+    safe_print(f"结束时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    safe_flush()
     return True
 
 def main():
     if len(sys.argv) < 2:
         log_error("请传入项目路径作为参数！")
-        print(f"用法: python {os.path.basename(__file__)} \"项目路径\" [--target-branch 目标分支]")
+        safe_print(f"用法: python {os.path.basename(__file__)} \"项目路径\" [--target-branch 目标分支]")
         # 在打包环境中不显示 input 提示
         if not hasattr(sys, '_MEIPASS'):
             input("按回车键退出...")

@@ -189,6 +189,7 @@ class GitMergeGUI:
         self.terminal.tag_config("success", foreground="green")
         self.terminal.tag_config("warning", foreground="yellow")
         self.terminal.tag_config("info", foreground="cyan")
+        self.terminal.tag_config("step", foreground="#67c23a", font=("Consolas", 14, "bold"))
     
 
     
@@ -673,6 +674,8 @@ class GitMergeGUI:
             self.append_output(text, "warning")
         elif ">>> 正在执行:" in text:
             self.append_output(text, "info")
+        elif "=== 步骤" in text and "===" in text:
+            self.append_output(text, "step")
         else:
             self.append_output(text)
     
