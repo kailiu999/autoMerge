@@ -186,10 +186,10 @@ class GitMergeGUI:
         
         # 配置颜色标签
         self.terminal.tag_config("error", foreground="red")
-        self.terminal.tag_config("success", foreground="green")
+        self.terminal.tag_config("success", foreground="#67c23a")
         self.terminal.tag_config("warning", foreground="yellow")
-        self.terminal.tag_config("info", foreground="cyan")
-        self.terminal.tag_config("step", foreground="#67c23a", font=("Consolas", 14, "bold"))
+        self.terminal.tag_config("info", foreground="#67c23a")
+        self.terminal.tag_config("step", foreground="cyan", font=("Consolas", 14, "bold"))
     
 
     
